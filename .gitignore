@@ -1,0 +1,8 @@
+# 编译文件
+Release/ x64/ SampleIME/Release/ SampleIME/x64/
+# IDE缓存
+.vs/ .vscode/  *.rar
+# 日志、环境
+logs/ *.log .env  
+# 系统文件
+.DS_Store Thumbs.db
