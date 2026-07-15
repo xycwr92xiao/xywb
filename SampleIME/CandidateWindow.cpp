@@ -705,7 +705,7 @@ void CCandidateWindow::_DrawList(_In_ HDC dcHandle, _In_ UINT iIndex, _In_ RECT 
             rcItem.left = startX - 3;
             rcItem.right = startX + itemWidth + 6;
             rcItem.top = prc->top + _contentTopMargin ;
-            rcItem.bottom = rcItem.top + cyLine - 3;
+            rcItem.bottom = rcItem.top + cyLine - 1;
 
             // 根据是否选中设置背景色
             if (_currentSelection == idx) {
