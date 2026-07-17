@@ -97,7 +97,7 @@ BOOL CCandidateWindow::_CreateMainWindow(ATOM atom, _In_opt_ HWND parentWndHandl
 
     if (!CBaseWindow::_Create(atom,
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-        WS_BORDER | WS_POPUP,
+        WS_POPUP | WS_THICKFRAME, 
         NULL, 0, 0, parentWndHandle))
     {
         return FALSE;
@@ -257,57 +257,57 @@ LRESULT CALLBACK CCandidateWindow::_WindowProcCallback(_In_ HWND wndHandle, UINT
     switch (uMsg)
     {
     case WM_CREATE:
+    {
+        HDC dcHandle = nullptr;
+
+        dcHandle = GetDC(wndHandle);
+        if (dcHandle)
         {
-            HDC dcHandle = nullptr;
+            HFONT hFontOld = (HFONT)SelectObject(dcHandle, Global::defaultlFontHandle);
+            GetTextMetrics(dcHandle, &_TextMetric);
 
-            dcHandle = GetDC(wndHandle);
-            if (dcHandle)
-            {
-                HFONT hFontOld = (HFONT)SelectObject(dcHandle, Global::defaultlFontHandle);
-                GetTextMetrics(dcHandle, &_TextMetric);
-
-                _cxTitle = _TextMetric.tmMaxCharWidth * _wndWidth;
-                SelectObject(dcHandle, hFontOld);
-                ReleaseDC(wndHandle, dcHandle);
-            }
+            _cxTitle = _TextMetric.tmMaxCharWidth * _wndWidth;
+            SelectObject(dcHandle, hFontOld);
+            ReleaseDC(wndHandle, dcHandle);
         }
-        return 0;
+    }
+    return 0;
 
     case WM_DESTROY:
         return 0;
 
     case WM_WINDOWPOSCHANGED:
+    {
+        WINDOWPOS* pWndPos = (WINDOWPOS*)lParam;
+
+        // move shadow
+        // move v-scroll
+        if (_pVScrollBarWnd)
         {
-            WINDOWPOS* pWndPos = (WINDOWPOS*)lParam;
-
-            // move shadow
-            // move v-scroll
-            if (_pVScrollBarWnd)
-            {
-                _pVScrollBarWnd->_OnOwnerWndMoved((pWndPos->flags & SWP_NOSIZE) == 0);
-            }
-
-            _FireMessageToLightDismiss(wndHandle, pWndPos);
+            _pVScrollBarWnd->_OnOwnerWndMoved((pWndPos->flags & SWP_NOSIZE) == 0);
         }
-        break;
+
+        _FireMessageToLightDismiss(wndHandle, pWndPos);
+    }
+    break;
 
     case WM_WINDOWPOSCHANGING:
+    {
+        WINDOWPOS* pWndPos = (WINDOWPOS*)lParam;
+
+        // show/hide shadow
+        // show/hide v-scroll
+        if (_pVScrollBarWnd)
         {
-            WINDOWPOS* pWndPos = (WINDOWPOS*)lParam;
-
-            // show/hide shadow
-            // show/hide v-scroll
-            if (_pVScrollBarWnd)
+            if ((pWndPos->flags & SWP_HIDEWINDOW) != 0)
             {
-                if ((pWndPos->flags & SWP_HIDEWINDOW) != 0)
-                {
-                    _pVScrollBarWnd->_Show(FALSE);
-                }
-
-                _pVScrollBarWnd->_OnOwnerWndMoved((pWndPos->flags & SWP_NOSIZE) == 0);
+                _pVScrollBarWnd->_Show(FALSE);
             }
+
+            _pVScrollBarWnd->_OnOwnerWndMoved((pWndPos->flags & SWP_NOSIZE) == 0);
         }
-        break;
+    }
+    break;
 
     case WM_SHOWWINDOW:
         // show/hide shadow
@@ -319,28 +319,28 @@ LRESULT CALLBACK CCandidateWindow::_WindowProcCallback(_In_ HWND wndHandle, UINT
         break;
 
     case WM_PAINT:
-        {
-            HDC dcHandle = nullptr;
-            PAINTSTRUCT ps;
+    {
+        HDC dcHandle = nullptr;
+        PAINTSTRUCT ps;
 
-            dcHandle = BeginPaint(wndHandle, &ps);
-            _OnPaint(dcHandle, &ps);
-            //_DrawBorder(wndHandle, 2);   // 直接指定 2px 边框
-            EndPaint(wndHandle, &ps);
-        }
-        return 0;
+        dcHandle = BeginPaint(wndHandle, &ps);
+        _OnPaint(dcHandle, &ps);
+        //_DrawBorder(wndHandle, 2);   // 直接指定 2px 边框
+        EndPaint(wndHandle, &ps);
+    }
+    return 0;
 
     case WM_SETCURSOR:
-        {
-            POINT cursorPoint;
+    {
+        POINT cursorPoint;
 
-            GetCursorPos(&cursorPoint);
-            MapWindowPoints(NULL, wndHandle, &cursorPoint, 1);
+        GetCursorPos(&cursorPoint);
+        MapWindowPoints(NULL, wndHandle, &cursorPoint, 1);
 
-            // handle mouse message
-            _HandleMouseMsg(HIWORD(lParam), cursorPoint);
-        }
-        return 1;
+        // handle mouse message
+        _HandleMouseMsg(HIWORD(lParam), cursorPoint);
+    }
+    return 1;
 
     case WM_MOUSEMOVE:
     case WM_LBUTTONDOWN:
@@ -349,35 +349,51 @@ LRESULT CALLBACK CCandidateWindow::_WindowProcCallback(_In_ HWND wndHandle, UINT
     case WM_LBUTTONUP:
     case WM_MBUTTONUP:
     case WM_RBUTTONUP:
-        {
-            POINT point;
+    {
+        POINT point;
 
-            POINTSTOPOINT(point, MAKEPOINTS(lParam));
+        POINTSTOPOINT(point, MAKEPOINTS(lParam));
 
-            // handle mouse message
-            _HandleMouseMsg(uMsg, point);
-        }
-		// we processes this message, it should return zero. 
-        return 0;
+        // handle mouse message
+        _HandleMouseMsg(uMsg, point);
+    }
+    // we processes this message, it should return zero. 
+    return 0;
 
     case WM_MOUSEACTIVATE:
+    {
+        WORD mouseEvent = HIWORD(lParam);
+        if (mouseEvent == WM_LBUTTONDOWN ||
+            mouseEvent == WM_RBUTTONDOWN ||
+            mouseEvent == WM_MBUTTONDOWN)
         {
-            WORD mouseEvent = HIWORD(lParam);
-            if (mouseEvent == WM_LBUTTONDOWN || 
-                mouseEvent == WM_RBUTTONDOWN || 
-                mouseEvent == WM_MBUTTONDOWN) 
-            {
-                return MA_NOACTIVATE;
-            }
+            return MA_NOACTIVATE;
         }
-        break;
+    }
+    break;
 
     case WM_POINTERACTIVATE:
         return PA_NOACTIVATE;
 
     case WM_VSCROLL:
+    {
         _OnVScroll(LOWORD(wParam), HIWORD(wParam));
         return 0;
+    }
+    case WM_NCCALCSIZE:
+    {
+        if (wParam == TRUE)
+        {
+            NCCALCSIZE_PARAMS* pParams = (NCCALCSIZE_PARAMS*)lParam;
+            // 获取原始窗口矩形
+            RECT rc = pParams->rgrc[0];
+            // 客户区设为整个窗口，但顶部保留 1 像素（边框）
+            pParams->rgrc[0] = rc;
+            pParams->rgrc[0].top += 1;   // 关键：保留 1px 非客户区，使 DWM 认为有边框
+            return WVR_REDRAW;
+        }
+        break;
+    }
     }
 
     return DefWindowProc(wndHandle, uMsg, wParam, lParam);

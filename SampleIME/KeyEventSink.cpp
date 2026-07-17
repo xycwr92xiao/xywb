@@ -696,7 +696,14 @@ STDAPI CSampleIME::OnPreservedKey(ITfContext *pContext, REFGUID rguid, BOOL *pIs
         OutputDebugString(L"您按下了热键 Ctrl + W  ------------------------下面将手工造词-------------------T ");
         if (_pCompositionProcessorEngine)
         {
+			HWND hwndForeground = GetForegroundWindow();
             _pCompositionProcessorEngine->ShowUserWordDialog();
+            if (hwndForeground && IsWindow(hwndForeground))
+            {
+                SetForegroundWindow(hwndForeground);
+                // 可选：为了确保输入焦点，可同时向该窗口发送 WM_SETFOCUS 消息
+                // PostMessage(hwndForeground, WM_SETFOCUS, 0, 0);
+            }
         }
         *pIsEaten = TRUE;   // 吃掉该按键，不传给应用程序
         return S_OK;

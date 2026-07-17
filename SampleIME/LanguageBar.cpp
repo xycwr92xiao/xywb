@@ -337,7 +337,7 @@ BOOL CToolbarWindow::Create(HWND hParent)
     // 创建窗口（宽高使用上面计算的 width/height）
     HWND hWnd = CreateWindowEx(
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-        (LPCTSTR)s_atom, L"", WS_POPUP | WS_BORDER,
+        (LPCTSTR)s_atom, L"", WS_POPUP | WS_THICKFRAME,
         g_tx, g_ty, width, height,
         hParent, NULL, Global::dllInstanceHandle, this);
 
@@ -465,7 +465,15 @@ LRESULT CALLBACK CToolbarWindow::ButtonSubclassProc(HWND hWnd, UINT uMsg, WPARAM
 
     int idx = (int)(GetWindowLongPtr(hWnd, GWLP_ID) - TB_CMD_IME);
     if (idx < 0 || idx >= 6) return DefWindowProc(hWnd, uMsg, wParam, lParam);
-
+    // 新增：拦截按钮背景颜色，统一工具栏底色
+    if (uMsg == WM_CTLCOLORBTN)
+    {
+        HDC hdcBtn = (HDC)wParam;
+        SetBkMode(hdcBtn, TRANSPARENT);
+        // 返回工具栏背景画刷，按钮空白区域全部继承窗口底色
+        static HBRUSH hBtnBg = CreateSolidBrush(Global::toolbarBgColor);
+        return (LRESULT)hBtnBg;
+    }
     switch (uMsg)
     {
     case WM_PAINT:
@@ -659,11 +667,26 @@ LRESULT CALLBACK CToolbarWindow::_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
     case WM_ERASEBKGND:
     {
         HDC hdc = (HDC)wParam;
-        RECT rc;
-        GetClientRect(hWnd, &rc);
-        HBRUSH hBrush = CreateSolidBrush(Global::toolbarBgColor);
-        FillRect(hdc, &rc, hBrush);
-        DeleteObject(hBrush);
+        RECT rcClient;
+        GetClientRect(hWnd, &rcClient);
+        // 静态画刷避免频繁创建销毁GDI资源
+        static HBRUSH hToolBgBrush = nullptr;
+        if (!hToolBgBrush)
+            hToolBgBrush = CreateSolidBrush(Global::toolbarBgColor);
+        else
+        {
+            // 颜色修改时重建画刷
+            COLORREF clr;
+            LOGBRUSH lb;
+            GetObject(hToolBgBrush, sizeof(lb), &lb);
+            clr = lb.lbColor;
+            if (clr != Global::toolbarBgColor)
+            {
+                DeleteObject(hToolBgBrush);
+                hToolBgBrush = CreateSolidBrush(Global::toolbarBgColor);
+            }
+        }
+        FillRect(hdc, &rcClient, hToolBgBrush);
         return TRUE;
     }
     case WM_NCHITTEST:
@@ -717,8 +740,34 @@ LRESULT CALLBACK CToolbarWindow::_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, L
         return 0;
     }
     case WM_DESTROY:
+    {
         SetWindowLongPtr(hWnd, GWLP_USERDATA, 0);
         break;
+    }
+    case WM_NCCALCSIZE:
+    {
+        if (wParam == TRUE)
+        {
+            NCCALCSIZE_PARAMS* pParams = (NCCALCSIZE_PARAMS*)lParam;
+            // 客户区 = 整个窗口，但顶部留 1 像素边框
+            pParams->rgrc[0].top += 1;
+            return WVR_REDRAW;
+        }
+        break;
+    }
+    case WM_ACTIVATE:
+    {
+        // wParam == WA_ACTIVE 窗口激活；WA_INACTIVE 失活
+        InvalidateRect(hWnd, NULL, TRUE); // 全部客户区重绘，擦除旧灰色
+        UpdateWindow(hWnd); // 立即执行WM_PAINT+WM_ERASEBKGND填充底色
+        break;
+    }
+    //case WM_NCACTIVATE:
+    //{
+    //    InvalidateRect(hWnd, NULL, TRUE);
+    //    UpdateWindow(hWnd);
+    //    break;
+    //}
     }
     return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
@@ -3725,13 +3774,11 @@ void CLangBarItemButton::_ShowHelpDialog()
         L"昕宇五笔输入法\n版本 1.0\n\n快捷键说明：\n"
         L"左 Ctrl + 空格  ：切换五笔/拼音\n"
         L"Shift/Ctrl+空格 ：切换中/英文输入模式\n"
-        L"Shift+空格      ：切换全角/半角\n"
-        L"Ctrl+句号       ：切换中/英文标点\n"
-        L"右 Shift        ：快速切换中英文\n"
-        L"左 Ctrl         ：快速切换五笔拼音\n"
-        L"右 Ctrl         ：快速切换拼音与混合\n"
-        L"Ctrl + W        ：快速手工造词\n"
-        L"候选词选择：数字键或鼠标点击");
+        L"右Shift         ：快速切换中英文\n"
+        L"左Ctrl/Shift    ：快速切换五笔拼音\n"
+        L"长右Ctrl/Ctrl+W ：快速手工造词\n"
+        L"短右Ctrl        ：切换横向纵向候选窗口\n"
+        L"候选：左右上下方向键或数字键或鼠标点击");
     MessageBox(NULL,  szHelp, L"帮助", MB_OK);
 }
 
