@@ -33,6 +33,7 @@ BOOL isPyAndWbMode = FALSE;
 BOOL isChineseMode = TRUE;
 BOOL isGetFocus = FALSE; // 引用共享变量
 HWND hToolBarWnd = NULL;
+HWND m_hwndForeground = NULL;
 BOOL isHorizontalMode = FALSE;   // 默认横向（五笔风格）
 int  nMaxHorizontalItems = 5;      // 横向默认5个
 int  nMaxVerticalItems = 10;     // 纵向默认10个

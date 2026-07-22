@@ -272,7 +272,38 @@ LRESULT CALLBACK CCandidateWindow::_WindowProcCallback(_In_ HWND wndHandle, UINT
         }
     }
     return 0;
-
+    case WM_ERASEBKGND:
+    {
+        HDC hdc = (HDC)wParam;
+        RECT rcClient;
+        GetClientRect(wndHandle, &rcClient);
+        // 静态画刷避免频繁创建销毁GDI资源
+        static HBRUSH hToolBgBrush = nullptr;
+        if (!hToolBgBrush)
+            hToolBgBrush = CreateSolidBrush(_backgroundColor);
+        else
+        {
+            // 颜色修改时重建画刷
+            COLORREF clr;
+            LOGBRUSH lb;
+            GetObject(hToolBgBrush, sizeof(lb), &lb);
+            clr = lb.lbColor;
+            if (clr != _backgroundColor)
+            {
+                DeleteObject(hToolBgBrush);
+                hToolBgBrush = CreateSolidBrush(_backgroundColor);
+            }
+        }
+        FillRect(hdc, &rcClient, hToolBgBrush);
+        return TRUE; // 关键：告诉系统背景已全部绘制，不再用系统灰色填充
+    }
+    case WM_ACTIVATE:
+    {
+        // wParam == WA_ACTIVE 窗口激活；WA_INACTIVE 失活
+        InvalidateRect(wndHandle, NULL, TRUE); // 全部客户区重绘，擦除旧灰色
+        UpdateWindow(wndHandle); // 立即执行WM_PAINT+WM_ERASEBKGND填充底色
+        break;
+    }
     case WM_DESTROY:
         return 0;
 

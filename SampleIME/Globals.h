@@ -135,6 +135,7 @@ extern BOOL IsControlKeyDownOnly;
 extern BOOL IsAltKeyDownOnly;
 extern BOOL isGetFocus;   //
 extern HWND hToolBarWnd;
+extern HWND m_hwndForeground; // Ç°Ì¨´°¿Ú¾ä±ú
 extern BOOL isPinyinMode;
 extern BOOL isPyAndWbMode;
 extern BOOL isChineseMode;

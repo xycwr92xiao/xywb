@@ -53,14 +53,7 @@ STDAPI CSampleIME::OnSetFocus(_In_ ITfDocumentMgr *pDocMgrFocus, _In_ ITfDocumen
     if (Global::b_showedToolbar) return S_OK;
     _InitTextEditSink(pDocMgrFocus);
     Global::isGetFocus = pDocMgrFocus != nullptr;
-    /*HWND hwnd = ::GetForegroundWindow();*/
-    //if (hwnd) {
-    //    if (GetClassNameW(hwnd, Global::foregroundClassName, 128)) {
-    //        OutputDebugString(Global::isGetFocus ? L"00激活输入法 OnSetFocus:  -------------------当前程序名称： ------------------------------------------------------------Global::isGetFocus：---T":
-    //            L"00激活输入法 OnSetFocus:  -------------------当前程序名称： ------------------------------------------------------------Global::isGetFocus：---F");
-    //        OutputDebugString(Global::foregroundClassName);
-    //    }
-    //}
+
     OutputDebugString(Global::isGetFocus ? L"0011CSampleIME::OnSetFocus确保有焦点--Global::isGetFocus----------------T " : L"0011CSampleIME::OnSetFocus确保有焦点--Global::isGetFocus-----------------------F ");
     _UpdateLanguageBarOnSetFocus(pDocMgrFocus);
     if (pDocMgrFocus != nullptr)  // 确保有焦点

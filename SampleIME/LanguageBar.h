@@ -100,7 +100,7 @@ private:
     ITfThreadMgr* _pThreadMgr;
     TfClientId    _tfClientId;
     HMENU   _hMenu;                 // 右键菜单句柄
-
+	HWND m_hwndForeground = nullptr; // 前台窗口句柄
     void    _CreatePopupMenu();     // 创建菜单
     void    _UpdateMenuItems();     // 更新菜单项状态（勾选/文本）
     void    _ShowHelpDialog();      // 帮助

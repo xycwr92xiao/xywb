@@ -785,10 +785,35 @@ void CToolbarWindow::_ShowContextMenu(POINT pt)
     AppendMenu(hMenu, MF_STRING, 5, Global::showRemainingCode ? L"显示编码剩余(开)" : L"显示剩余编码(关)");
     AppendMenu(hMenu, MF_STRING, 6, Global::isHorizontalMode ? L"候选窗口变垂直" : L"候选窗口变水平");
     CheckMenuItem(hMenu, 5, Global::showRemainingCode ? MF_CHECKED : MF_UNCHECKED);
-    HWND hParent = hwndForeground;
-    if (hParent == NULL) hParent = GetDesktopWindow();
+	hwndForeground = ::GetForegroundWindow();
+	Global::m_hwndForeground = hwndForeground;
+    // 注册临时窗口类（仅首次执行）
+    static ATOM tmpToolsWinAtom = 0;
+    if (tmpToolsWinAtom == 0)
+    {
+        WNDCLASSEX wc = { 0 };
+        wc.cbSize = sizeof(WNDCLASSEX);
+        wc.lpfnWndProc = DefWindowProc;
+        wc.hInstance = Global::dllInstanceHandle;
+        wc.lpszClassName = L"TmpToolsMenuParentWin";
+        tmpToolsWinAtom = RegisterClassEx(&wc);
+    }
+    // 创建完全隐藏的临时窗口，作为菜单父窗口
+    HWND hTmpParent = CreateWindowEx(0,
+        (LPCWSTR)tmpToolsWinAtom, L"", WS_POPUP,
+        0, 0, 0, 0,
+        NULL, NULL, Global::dllInstanceHandle, NULL);
 
-    int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hParent, NULL);
+    int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hTmpParent, NULL);
+    // 循环处理菜单消息，保证正常渲染
+    MSG msg;
+    while (PeekMessage(&msg, hTmpParent, 0, 0, PM_REMOVE))
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+    DestroyWindow(hTmpParent);
+
     if (cmd == 1)
     {
         g_isVisibleToolBar = FALSE;
@@ -834,10 +859,9 @@ void CToolbarWindow::_ShowContextMenu(POINT pt)
     DestroyMenu(hMenu);
     if (hwndForeground && IsWindow(hwndForeground))
     {
-        // 注意：SetForegroundWindow 受系统限制，但在同一输入会话中通常可行
+        Global::isGetFocus = TRUE;
         SetForegroundWindow(hwndForeground);
-        // 可选：为了确保输入焦点，可同时向该窗口发送 WM_SETFOCUS 消息
-        // PostMessage(hwndForeground, WM_SETFOCUS, 0, 0);
+		hwndForeground = nullptr;
     }
 }
 
@@ -935,7 +959,9 @@ void CToolbarWindow::_OnButtonClick(int idx)
     UpdateAllButtons();
     if (hwndForeground && IsWindow(hwndForeground))
     {
+        Global::isGetFocus = TRUE;
         SetForegroundWindow(hwndForeground);
+		hwndForeground = nullptr;
         // 可选：为了确保输入焦点，可同时向该窗口发送 WM_SETFOCUS 消息
         // PostMessage(hwndForeground, WM_SETFOCUS, 0, 0);
     }
@@ -1582,6 +1608,14 @@ namespace {
             else if (ctrlId == IDCANCEL)
             {
                 DestroyWindow(hDlg);
+                if (Global::m_hwndForeground && IsWindow(Global::m_hwndForeground))
+                {
+                    Global::isGetFocus = TRUE;
+                    SetForegroundWindow(Global::m_hwndForeground);
+                    // 可选：为了确保输入焦点，可同时向该窗口发送 WM_SETFOCUS 消息
+                    // PostMessage(hwndForeground, WM_SETFOCUS, 0, 0);
+					Global::m_hwndForeground = NULL; // 清空记录
+                }
                 return TRUE;
             }
             break;
@@ -1663,7 +1697,6 @@ namespace {
             }
         }
         EnableWindow(hParent, TRUE);
-        SetForegroundWindow(hParent);
         UnregisterClass(szDlgClass, hInst);
     }
     // 控件 ID 定义（也可放在函数内）
@@ -2609,14 +2642,15 @@ VOID CCompositionProcessorEngine::SetLanguageBarStatus(DWORD status, BOOL isSet)
             HWND hwnd = ::GetForegroundWindow();
             if (hwnd) {
                 if (GetClassNameW(hwnd, Global::foregroundClassName, 128)) {
-                OutputDebugString(Global::isGetFocus ? L"22激活输入法 OnSetFocus:  -------------------当前程序名称： --------------------------Global::isGetFocus：---T":
-                    L"022激活输入法 OnSetFocus:  -------------------当前程序名称： ------------------------------Global::isGetFocus：---F");
+                OutputDebugString(Global::isGetFocus ? L"0022设置输入法语言栏状态 SetLanguageBarStatus:  -------------------当前程序名称： --------------Global::isGetFocus：---T":
+                    L"0022设置输入法语言栏状态 SetLanguageBarStatus:  -------------------当前程序名称： ---------------Global::isGetFocus：---F");
                 OutputDebugString(Global::foregroundClassName);
                     // 桌面常见窗口类名CabinetWClass
                     if (wcscmp(Global::foregroundClassName, L"Progman") == 0 ||
                         wcscmp(Global::foregroundClassName, L"WorkerW") == 0 || /*wcscmp(Global::foregroundClassName, L"CabinetWClass") == 0 ||*/
                         wcscmp(Global::foregroundClassName, L"SysListView32") == 0) {
                         isDesktop = TRUE;
+                        OutputDebugString(L"002211设置输入法语言栏状态 SetLanguageBarStatus:  -------------------isDesktop-------------------：---T");
                     }
                 }
                 if(Global::hToolBarWnd && hwnd == Global::hToolBarWnd) isDesktop = TRUE;
@@ -2627,6 +2661,7 @@ VOID CCompositionProcessorEngine::SetLanguageBarStatus(DWORD status, BOOL isSet)
         OutputDebugString(isDesktop ? L"031激活输入法 SetLanguageBarStatus:  -------------------显示工具栏---isDesktop----------------T " : L"031激活输入法 SetLanguageBarStatus:  -------------------显示工具栏---isDesktop----------------F");
         OutputDebugString(Global::isGetFocus ? L"032激活输入法 SetLanguageBarStatus:  -------------------显示工具栏---Global::isGetFocus----------------T " : L"032激活输入法 SetLanguageBarStatus:  -------------------显示工具栏---Global::isGetFocus----------------F");*/
         _pLanguageBar_IMEMode->SetToolbarVisible(isVisible);
+        isDesktop = FALSE;
         OutputDebugString(isVisible ? L"033激活输入法 SetLanguageBarStatus:  -------------------显示工具栏---isVisible----------------T " : L"033激活输入法 SetLanguageBarStatus:  -------------------显示工具栏---isVisible----------------F");
     }
     if (_pLanguageBar_DoubleSingleByte) {
@@ -2923,46 +2958,10 @@ STDAPI CLangBarItemButton::OnClick(TfLBIClick click, POINT pt, const RECT* prcAr
     pt; prcArea;
     if (click == TF_LBI_CLK_RIGHT)
     {
-        HWND hForeground = GetForegroundWindow();
-        if (hForeground == NULL) {
-            hForeground = GetDesktopWindow();
-        }
-        BOOL bIsNotepad = FALSE;
-        HWND hDesktop = FALSE;
-        if (hForeground)
-        {
-            WCHAR szClassName[64] = { 0 };
-            GetClassName(hForeground, szClassName, 64);
-            // 记事本的主窗口类名可能是 "Notepad" 或 "Edit"
-            if (wcscmp(szClassName, L"Notepad") == 0 || wcscmp(szClassName, L"Edit") == 0)
-            {
-                bIsNotepad = TRUE;
-            }
-        }
-        if (bIsNotepad)
-        {
-            hDesktop = FindWindow(L"Progman", NULL);
-            if (!hDesktop) hDesktop = FindWindow(L"WorkerW", NULL);
-            if (!hDesktop) hDesktop = GetDesktopWindow();
-        }
-        if (bIsNotepad && hDesktop)
-        {
-            SetForegroundWindow(hDesktop);
-            // 非阻塞延时，允许消息处理
-            DWORD endTime = GetTickCount() + 150;
-            while (GetTickCount() < endTime) {
-                MSG msg;
-                while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-                    TranslateMessage(&msg);
-                    DispatchMessage(&msg);
-                }
-            }
-            InitMenu(NULL);
-            return S_OK;
-        }
-        // 直接显示右键菜单
+        Global::m_hwndForeground = GetForegroundWindow();
         InitMenu(NULL);
         return S_OK;
+
     }
 
     // 左键保持原有切换逻辑
@@ -2989,12 +2988,34 @@ STDAPI CLangBarItemButton::InitMenu(ITfMenu* pMenu)
 
     POINT pt;
     GetCursorPos(&pt);
-    // 使用 GetForegroundWindow() 作为父窗口
-    HWND hParent = GetForegroundWindow();
-    if (hParent == NULL) {
-        hParent = GetDesktopWindow();
+    // 注册临时窗口类（仅首次执行）
+    static ATOM tmpWinAtom = 0;
+    if (tmpWinAtom == 0)
+    {
+        WNDCLASSEX wc = { 0 };
+        wc.cbSize = sizeof(WNDCLASSEX);
+        wc.lpfnWndProc = DefWindowProc;
+        wc.hInstance = Global::dllInstanceHandle;
+        wc.lpszClassName = L"TmpMenuParentWin";
+        tmpWinAtom = RegisterClassEx(&wc);
     }
-    UINT uSelected = TrackPopupMenu(_hMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hParent, NULL);
+    // 创建完全隐藏的临时窗口，作为菜单父窗口
+    HWND hTmpParent = CreateWindowEx(0,
+        (LPCWSTR)tmpWinAtom, L"", WS_POPUP,
+        0, 0, 0, 0,
+        NULL, NULL, Global::dllInstanceHandle, NULL);
+    
+
+    UINT uSelected = TrackPopupMenu(_hMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hTmpParent, NULL);
+    // 处理消息，保证菜单正常绘制
+    MSG msg;
+    while (PeekMessage(&msg, hTmpParent, 0, 0, PM_REMOVE))
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+    // 销毁临时窗口
+    DestroyWindow(hTmpParent);
     if (uSelected)
         OnMenuSelect(uSelected);
 
@@ -3166,6 +3187,12 @@ STDAPI CLangBarItemButton::OnMenuSelect(UINT wID)
         }
     }
     break;
+    }
+    if (Global::m_hwndForeground && IsWindow(Global::m_hwndForeground))
+    {
+        Global::isGetFocus = TRUE;
+        SetForegroundWindow(Global::m_hwndForeground);
+        Global::m_hwndForeground = NULL;
     }
     return S_OK;
 }
@@ -3511,11 +3538,7 @@ void CLangBarItemButton::_ShowEmojiDialog()
         if (!IsWindow(hDlg)) break;
     }
 
-    if (hParent != GetDesktopWindow() && hParent != NULL)
-    {
-        EnableWindow(hParent, TRUE);
-        SetForegroundWindow(hParent);
-    }
+    EnableWindow(hParent, TRUE);
 
     UnregisterClass(szDlgClass, hInst);
 }
@@ -3762,8 +3785,6 @@ void CLangBarItemButton::_EditUserWords()
         if (!IsWindow(hDlg)) break;
     }
     EnableWindow(hParent, TRUE);
-    SetForegroundWindow(hParent);
-
     UnregisterClass(szDlgClass, hInst);
 }
 
@@ -3865,7 +3886,6 @@ void CLangBarItemButton::_ShowUserWordDialog()
         if (!IsWindow(hDlg)) break;
     }
     EnableWindow(hParent, TRUE);
-    SetForegroundWindow(hParent);
 
     UnregisterClass(szDlgClass, hInst);
 }
