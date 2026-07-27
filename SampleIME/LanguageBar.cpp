@@ -2637,24 +2637,22 @@ VOID CCompositionProcessorEngine::SetLanguageBarStatus(DWORD status, BOOL isSet)
     if (_pLanguageBar_IMEMode) {
         _pLanguageBar_IMEMode->SetStatus(status, isSet);
         BOOL isDesktop = FALSE;
-        if (g_isVisibleToolBar) {
-            // 检查焦点窗口是否属于桌面环境
-            HWND hwnd = ::GetForegroundWindow();
-            if (hwnd) {
-                if (GetClassNameW(hwnd, Global::foregroundClassName, 128)) {
-                OutputDebugString(Global::isGetFocus ? L"0022激活输入法 OnSetFocus:  -------------------当前程序名称： --------------------------Global::isGetFocus：---T":
+        // 检查焦点窗口是否属于桌面环境
+        HWND hwnd = ::GetForegroundWindow();
+        if (hwnd) {
+            if (GetClassNameW(hwnd, Global::foregroundClassName, 128)) {
+                OutputDebugString(Global::isGetFocus ? L"0022激活输入法 OnSetFocus:  -------------------当前程序名称： --------------------------Global::isGetFocus：---T" :
                     L"022激活输入法 OnSetFocus:  -------------------当前程序名称： ------------------------------Global::isGetFocus：---F");
                 OutputDebugString(Global::foregroundClassName);
-                    // 桌面常见窗口类名CabinetWClass
-                    if (wcscmp(Global::foregroundClassName, L"Progman") == 0 ||
-                        wcscmp(Global::foregroundClassName, L"WorkerW") == 0 || /*wcscmp(Global::foregroundClassName, L"CabinetWClass") == 0 ||*/
-                        wcscmp(Global::foregroundClassName, L"SysListView32") == 0) {
-                        isDesktop = TRUE;
-                        OutputDebugString(L"033激活输入法 SetLanguageBarStatus:  -------------------是桌面---isDesktop----------------T ");
-                    }
+                // 桌面常见窗口类名CabinetWClass
+                if (wcscmp(Global::foregroundClassName, L"Progman") == 0 ||
+                    wcscmp(Global::foregroundClassName, L"WorkerW") == 0 || /*wcscmp(Global::foregroundClassName, L"CabinetWClass") == 0 ||*/
+                    wcscmp(Global::foregroundClassName, L"SysListView32") == 0) {
+                    isDesktop = TRUE;
+                    OutputDebugString(L"033激活输入法 SetLanguageBarStatus:  -------------------是桌面---isDesktop----------------T ");
                 }
-                if(Global::hToolBarWnd && hwnd == Global::hToolBarWnd) isDesktop = TRUE;
             }
+            if (Global::hToolBarWnd && hwnd == Global::hToolBarWnd) isDesktop = TRUE;
         }
         BOOL isVisible = g_isVisibleToolBar && (Global::isGetFocus || isDesktop);
         /*OutputDebugString(g_isVisibleToolBar ? L"030激活输入法 SetLanguageBarStatus:  -------------------显示工具栏---g_isVisibleToolBar----------------T " : L"030激活输入法 SetLanguageBarStatus:  -------------------显示工具栏---g_isVisibleToolBar----------------F");

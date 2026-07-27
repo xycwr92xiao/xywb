@@ -252,7 +252,9 @@ BOOL CSampleIME::_IsKeyboardDisabled()
     ITfDocumentMgr* pDocMgrFocus = nullptr;
     ITfContext* pContext = nullptr;
     BOOL isDisabled = FALSE;
-
+    if (wcscmp(Global::foregroundClassName, L"kwmusicmaindlg") == 0) {
+        return isDisabled;
+    }
     if ((_pThreadMgr->GetFocus(&pDocMgrFocus) != S_OK) ||
         (pDocMgrFocus == nullptr))
     {
@@ -311,6 +313,11 @@ STDAPI CSampleIME::OnSetFocus(BOOL fForeground)
 
 STDAPI CSampleIME::OnTestKeyDown(ITfContext* pContext, WPARAM wParam, LPARAM lParam, BOOL* pIsEaten)
 {
+    if (pContext == nullptr)
+    {
+        *pIsEaten = FALSE;
+        return S_OK;   // 无上下文，不处理按键
+    }
     Global::UpdateModifiers(wParam, lParam);
     // ========== 新增：处理左 Ctrl 按下 ==========
     BOOL isInputKey = (wParam >= 'A' && wParam <= 'Z') ||
@@ -414,6 +421,11 @@ STDAPI CSampleIME::OnTestKeyDown(ITfContext* pContext, WPARAM wParam, LPARAM lPa
 
 STDAPI CSampleIME::OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam, BOOL *pIsEaten)
 {
+    if (pContext == nullptr)
+    {
+        *pIsEaten = FALSE;
+        return S_OK;   // 无上下文，不处理按键
+    }
     Global::UpdateModifiers(wParam, lParam);
     BOOL isInputKey = (wParam >= 'A' && wParam <= 'Z') ||
         (wParam >= '0' && wParam <= '9') ||
