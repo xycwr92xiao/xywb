@@ -300,13 +300,15 @@ ExitError:
 
 STDAPI CSampleIME::Deactivate()
 {
+    OutputDebugString(L"999 输入法De活动 CSampleIME ：：Deactivate:  -------------------called---------------- ");
     if (m_bStickySet) {
         Global::ActivateStickyHotkey(m_bStickyOriginal, nullptr);  // 恢复原来的启用状态
         m_bStickySet = FALSE;
     }
     if (Global::hToolBarWnd && ::IsWindow(Global::hToolBarWnd))
     {
-        ::PostMessage(Global::hToolBarWnd, WM_CLOSE, 0, 0);
+        ::DestroyWindow(Global::hToolBarWnd);
+        //::PostMessage(Global::hToolBarWnd, WM_CLOSE, 0, 0);
         Global::hToolBarWnd = NULL;
     }
     if (_pCompositionProcessorEngine)

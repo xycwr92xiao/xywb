@@ -2642,15 +2642,15 @@ VOID CCompositionProcessorEngine::SetLanguageBarStatus(DWORD status, BOOL isSet)
             HWND hwnd = ::GetForegroundWindow();
             if (hwnd) {
                 if (GetClassNameW(hwnd, Global::foregroundClassName, 128)) {
-                OutputDebugString(Global::isGetFocus ? L"0022设置输入法语言栏状态 SetLanguageBarStatus:  -------------------当前程序名称： --------------Global::isGetFocus：---T":
-                    L"0022设置输入法语言栏状态 SetLanguageBarStatus:  -------------------当前程序名称： ---------------Global::isGetFocus：---F");
+                OutputDebugString(Global::isGetFocus ? L"0022激活输入法 OnSetFocus:  -------------------当前程序名称： --------------------------Global::isGetFocus：---T":
+                    L"022激活输入法 OnSetFocus:  -------------------当前程序名称： ------------------------------Global::isGetFocus：---F");
                 OutputDebugString(Global::foregroundClassName);
                     // 桌面常见窗口类名CabinetWClass
                     if (wcscmp(Global::foregroundClassName, L"Progman") == 0 ||
                         wcscmp(Global::foregroundClassName, L"WorkerW") == 0 || /*wcscmp(Global::foregroundClassName, L"CabinetWClass") == 0 ||*/
                         wcscmp(Global::foregroundClassName, L"SysListView32") == 0) {
                         isDesktop = TRUE;
-                        OutputDebugString(L"002211设置输入法语言栏状态 SetLanguageBarStatus:  -------------------isDesktop-------------------：---T");
+                        OutputDebugString(L"033激活输入法 SetLanguageBarStatus:  -------------------是桌面---isDesktop----------------T ");
                     }
                 }
                 if(Global::hToolBarWnd && hwnd == Global::hToolBarWnd) isDesktop = TRUE;
@@ -2661,7 +2661,6 @@ VOID CCompositionProcessorEngine::SetLanguageBarStatus(DWORD status, BOOL isSet)
         OutputDebugString(isDesktop ? L"031激活输入法 SetLanguageBarStatus:  -------------------显示工具栏---isDesktop----------------T " : L"031激活输入法 SetLanguageBarStatus:  -------------------显示工具栏---isDesktop----------------F");
         OutputDebugString(Global::isGetFocus ? L"032激活输入法 SetLanguageBarStatus:  -------------------显示工具栏---Global::isGetFocus----------------T " : L"032激活输入法 SetLanguageBarStatus:  -------------------显示工具栏---Global::isGetFocus----------------F");*/
         _pLanguageBar_IMEMode->SetToolbarVisible(isVisible);
-        isDesktop = FALSE;
         OutputDebugString(isVisible ? L"033激活输入法 SetLanguageBarStatus:  -------------------显示工具栏---isVisible----------------T " : L"033激活输入法 SetLanguageBarStatus:  -------------------显示工具栏---isVisible----------------F");
     }
     if (_pLanguageBar_DoubleSingleByte) {
@@ -2740,7 +2739,18 @@ CLangBarItemButton::~CLangBarItemButton()
         DestroyMenu(_hMenu);
         _hMenu = nullptr;
     }
-    if (_pToolbar) { delete _pToolbar; _pToolbar = nullptr; Global::hToolBarWnd = NULL; }
+    if (_pToolbar)
+    {
+        HWND hWnd = _pToolbar->_GetHwnd();
+        if (hWnd && ::IsWindow(hWnd))
+        {
+            // 先销毁窗口，窗口过程会清空 GWLP_USERDATA
+            ::DestroyWindow(hWnd);
+        }
+        delete _pToolbar;
+        _pToolbar = nullptr;
+        Global::hToolBarWnd = NULL;
+    }
     DllRelease();
     CleanUp();
 }
