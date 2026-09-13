@@ -303,7 +303,7 @@ HRESULT CKeyStateComposing::HandleKeyDoubleSingleByte(KeyHandlerEditSessionDTO d
 
 HRESULT CKeyStateComposing::HandleKeyPunctuation(KeyHandlerEditSessionDTO dto)
 {
-    return _pTextService->_HandleCompositionPunctuation(dto.ec, dto.pContext, dto.wch);
+    return _pTextService->_HandleCompositionPunctuation(dto.ec, dto.pContext, dto.wch, dto.vkCode);
 }
 
 /*

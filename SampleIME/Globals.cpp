@@ -35,6 +35,7 @@ BOOL isGetFocus = FALSE; // 引用共享变量
 HWND hToolBarWnd = NULL;
 HWND m_hwndForeground = NULL;
 BOOL isHorizontalMode = FALSE;   // 默认横向（五笔风格）
+int  nFontSize = 18;          // 候选词字号
 int  nMaxHorizontalItems = 5;      // 横向默认5个
 int  nMaxVerticalItems = 10;     // 纵向默认10个
 BOOL showRemainingCode = TRUE;
@@ -48,6 +49,9 @@ COLORREF toolbarBgColor = RGB(224, 237, 248);
 COLORREF toolbarHoverColor = RGB(180, 200, 220);
 WCHAR foregroundClassName[128] = {0};
 WCHAR m_recentHanzi[16] = { 0 };
+WCHAR fontName[50] = L"Microsoft YaHei";
+int nBOLD = 1;          // 加粗
+ULONGLONG lastDigitPressTime = 0;
 //---------------------------------------------------------------------
 // SampleIME CLSID
 //---------------------------------------------------------------------

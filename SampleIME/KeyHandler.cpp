@@ -237,13 +237,60 @@ HRESULT CSampleIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContext *pC
 
     if (hr == S_FALSE)  // 无候选
     {
-        // 回退刚添加的字母（因为无效）
-        //pEngine->RemoveVirtualKey(pEngine->GetVirtualKeyLength() - 1);
-        // 发出提示音
-        MessageBeep(MB_ICONASTERISK);   // 或 Beep(800, 200);
-        // 设置阻塞标志，后续字母不再进入组合
+        // === 新增：检测当前组合是否匹配预定义英文单词 ===
+        DWORD_PTR keyLen = pEngine->GetVirtualKeyLength();
+        if (keyLen > 0)
+        {
+            WCHAR szBuffer[64] = { 0 };
+            for (DWORD_PTR i = 0; i < keyLen; ++i)
+                szBuffer[i] = pEngine->GetVirtualKey(i);
+            szBuffer[keyLen] = L'\0';
+
+            // 预定义英文单词列表（可根据需要扩展）
+            static const LPCWSTR c_szEnglishWords[] = { L"admi", L"file", L"path", L"cmd", L"ping", L"date" , L"time", L"pass", L"word", L"user" };
+            for (int i = 0; i < ARRAYSIZE(c_szEnglishWords); ++i)
+            {
+                if (_wcsicmp(szBuffer, c_szEnglishWords[i]) == 0)
+                {
+                    // 1. 提交组合文本（英文单词）
+                    if (_IsComposing())
+                    {
+                        ITfRange* pRange = nullptr;
+                        if (SUCCEEDED(_pComposition->GetRange(&pRange)))
+                        {
+                            pRange->SetText(ec, 0, szBuffer, (ULONG)keyLen);
+                            // 将光标移到末尾
+                            pRange->Collapse(ec, TF_ANCHOR_END);
+                            TF_SELECTION sel;
+                            sel.range = pRange;
+                            sel.style.ase = TF_AE_NONE;
+                            sel.style.fInterimChar = FALSE;
+                            pContext->SetSelection(ec, 1, &sel);
+                            pRange->Release();
+                        }
+                    }
+
+                    // 2. 切换为英文模式（关闭 IME）
+                    //CCompartment CompartmentKeyboardOpen(_pThreadMgr, _tfClientId, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE);
+                    //CompartmentKeyboardOpen._SetCompartmentBOOL(FALSE);
+                    //Global::isChineseMode = FALSE;
+
+                    // 3. 结束组合并清理状态
+                    _TerminateComposition(ec, pContext);
+                    _fBlockNewInput = FALSE;
+                    _fWaitForPush = FALSE;
+                    _DeleteCandidateList(FALSE, pContext);
+                    pEngine->PurgeVirtualKey();
+
+                    // 4. 吃掉该按键（已由输入法处理）
+                    return S_OK;
+                }
+            }
+        }
+
+        // 原有无候选逻辑（阻塞后续输入）
         _fBlockNewInput = TRUE;
-        // 不取消组合，保留现有编码
+        MessageBeep(MB_ICONASTERISK);
         return S_OK;
     }
     else
@@ -735,7 +782,7 @@ EDITOR_TYPE GetCurrentEditorType(HWND hFocus)
     return ET_OTHER;
 }
 
-HRESULT CSampleIME::_HandleCompositionPunctuation(TfEditCookie ec, _In_ ITfContext* pContext, WCHAR wch)
+HRESULT CSampleIME::_HandleCompositionPunctuation(TfEditCookie ec, _In_ ITfContext* pContext, WCHAR wch, UINT vkCode)
 {
     HRESULT hr = S_OK;
 
@@ -754,26 +801,61 @@ HRESULT CSampleIME::_HandleCompositionPunctuation(TfEditCookie ec, _In_ ITfConte
         _TerminateComposition(ec, pContext);
         _pComposition = nullptr;
     }
-
-    // 2. 获取当前插入点（选择）
+    // 2. 获取当前插入点
     TF_SELECTION tfSelection;
     ULONG fetched = 0;
     if (FAILED(pContext->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &tfSelection, &fetched)) || fetched != 1)
+        return S_FALSE;
+
+    ITfRange* pRange = tfSelection.range;   // 引用计数已增加
+
+    // 3. 获取光标前一个字符，判断是否为数字
+    BOOL bPrevIsDigit = FALSE;
+    if (vkCode != VK_DECIMAL)  // 小键盘点号不需要检测
     {
-        return S_FALSE; // 无法获取插入点，放弃处理
+        // ----- 首选方案：单字符获取（在浏览器、记事本等中有效） -----
+        ITfRange* pRangeBefore = nullptr;
+        if (SUCCEEDED(pRange->Clone(&pRangeBefore)))
+        {
+            LONG cchShifted = 0;
+            // ★ 关键：必须检查实际移动了 -1 个字符
+            if (SUCCEEDED(pRangeBefore->ShiftStart(ec, -1, &cchShifted, NULL)) && cchShifted == -1)
+            {
+                WCHAR chBefore = 0;
+                ULONG copied = 0;
+                if (SUCCEEDED(pRangeBefore->GetText(ec, 0, &chBefore, 1, &copied)) && copied == 1)
+                {
+                    if (iswdigit(chBefore))
+                        bPrevIsDigit = TRUE;
+                }
+            }
+            pRangeBefore->Release();
+        }
     }
-
-    ITfRange* pRange = tfSelection.range;
-    // 我们将在插入后释放它，但先保留
-
-    // 3. 判断标点类型
     CCompositionProcessorEngine* pEngine = _pCompositionProcessorEngine;
     if (pEngine == nullptr)
     {
         pRange->Release();
         return E_FAIL;
     }
+    // 2. 如果前一个字符是数字，则强制使用英文标点（不转换全角）
     BOOL fFullWidth = pEngine->GetFullWidthPunctuation();
+    if (vkCode == VK_DECIMAL)
+    {
+        fFullWidth = FALSE;   // 小键盘点号永远英文
+    }
+    else if (wch == L'.')   // 也可扩展为其他标点，如逗号等
+    {
+        if (bPrevIsDigit)fFullWidth = FALSE;
+        else {
+            ULONGLONG curTime = GetTickCount64();
+            if (curTime - Global::lastDigitPressTime < 500)   // 500 毫秒内
+            {
+                fFullWidth = FALSE;
+            }
+        }
+    }
+    // 我们将在插入后释放它，但先保留
 
     WCHAR leftChar = 0, rightChar = 0;
     BOOL isPaired = FALSE;
@@ -923,7 +1005,8 @@ HRESULT CSampleIME::_HandleCompositionPunctuation(TfEditCookie ec, _In_ ITfConte
         }
     }
 
-    pRange->Release();
+    if (pRange)
+        pRange->Release();
 
     // 最后，确保没有残留的组合（如果因某些原因还有）
     if (_pComposition != nullptr)

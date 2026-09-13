@@ -74,6 +74,8 @@ public:
     void SetHorizontalMode(BOOL isHorizontal, UINT maxItems = 10, int spacing = 8);
     BOOL IsHorizontalMode() const { return _isHorizontalMode; }
 private:
+    int      _hoverIndex;              // 鼠标悬停的候选词索引，-1 表示无
+    COLORREF _hoverBkColor;            // 悬停项背景色（比窗口背景稍深）
     CTableDictionaryEngine* _pWubiEngine;   // 仅用于拼音模式查询五笔编码
     BOOL _isHorizontalMode;          // FALSE=纵向(默认)，TRUE=横向
     UINT _maxHorizontalItems;        // 横向最多显示词条数，默认10
@@ -133,5 +135,5 @@ private:
     int      _roundCornerRadius;        // 圆角半径（像素），0 表示无圆角
     int      _contentLeftMargin;        // 内容左边距（像素）
     int      _contentTopMargin;         // 内容上边距（像素）
-    POINT _lastMousePos;   // 记录上一次鼠标位置（客户区坐标）
+    int _contentPadX = 4;   // 词条左右内边距（由字号派生）
 };

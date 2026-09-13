@@ -134,6 +134,7 @@ extern BOOL IsShiftKeyDownOnly;
 extern BOOL IsControlKeyDownOnly;
 extern BOOL IsAltKeyDownOnly;
 extern BOOL isGetFocus;   //
+extern ULONGLONG lastDigitPressTime;   // 记录最后一次数字键按下的时间（毫秒）
 extern HWND hToolBarWnd;
 extern HWND m_hwndForeground; // 前台窗口句柄
 extern BOOL isPinyinMode;
@@ -144,7 +145,9 @@ extern int  nMaxHorizontalItems;       //
 extern int  nMaxVerticalItems;         //
 extern BOOL showRemainingCode;//新增全局设置
 extern BOOL b_showedToolbar;//新增全局设置
-
+extern int  nFontSize;          // 候选词字号
+extern int  nBOLD;          // 加粗
+extern WCHAR fontName[50];
 extern TF_PRESERVEDKEY shortcutKey;
 extern COLORREF candidateBgColor;
 extern COLORREF candidateTextColor;
@@ -189,5 +192,5 @@ extern const int PunctuationOffIcoIndex;
 extern const WCHAR LangbarImeModeDescription[];
 extern const WCHAR LangbarDoubleSingleByteDescription[];
 extern const WCHAR LangbarPunctuationDescription[];
-
+void InitializeGlobalFont();
 }

@@ -20,7 +20,8 @@ CCandidateWindow::CCandidateWindow(_In_ CANDWNDCALLBACK pfnCallback, _In_ void* 
     : _pWubiEngine(pWubiEngine)
 {
     _currentSelection = 0;
-
+    _hoverIndex = -1;                 // ← 新增
+    _hoverBkColor = RGB(0, 0, 0);     // ← 新增，稍后在 SetHorizontalMode 里赋值
     _SetTextColor(CANDWND_ITEM_COLOR, GetSysColor(COLOR_WINDOW));    // text color is black
     //_SetFillColor((HBRUSH)(COLOR_WINDOW+1));
 
@@ -42,9 +43,8 @@ CCandidateWindow::CCandidateWindow(_In_ CANDWNDCALLBACK pfnCallback, _In_ void* 
     _isHorizontalMode = Global::isHorizontalMode; // Global::isPinyinMode ? FALSE:TRUE;
     _maxHorizontalItems = Global::nMaxHorizontalItems;//Global::isPinyinMode ? 10:5;//默认横向最多显示5个词条
     _ShowCode = Global::showRemainingCode;//是否显示编码
-    _lastMousePos.x = -1;
-    _lastMousePos.y = -1;
-    _itemSpacing = 8;
+
+    _itemSpacing = 2;//词条之间背景的间距
     SetHorizontalMode(_isHorizontalMode, _maxHorizontalItems, _itemSpacing);
 }
 
@@ -83,7 +83,7 @@ BOOL CCandidateWindow::_Create(ATOM atom, _In_ UINT wndWidth, _In_opt_ HWND pare
         ret = _CreateVScrollWindow();
         if (FALSE == ret) goto Exit;
     }
-
+    SetHorizontalMode(_isHorizontalMode, _maxHorizontalItems, _itemSpacing);
     _ResizeWindow();
 
 Exit:
@@ -215,12 +215,12 @@ void CCandidateWindow::_Show(BOOL isShowWnd)
         POINT pt;
         GetCursorPos(&pt);
         ScreenToClient(_GetWnd(), &pt);
-        _lastMousePos = pt;
+
     }
     else
     {
-        _lastMousePos.x = -1;
-        _lastMousePos.y = -1;
+        _hoverIndex = -1;
+
     }
 }
 
@@ -265,10 +265,14 @@ LRESULT CALLBACK CCandidateWindow::_WindowProcCallback(_In_ HWND wndHandle, UINT
         {
             HFONT hFontOld = (HFONT)SelectObject(dcHandle, Global::defaultlFontHandle);
             GetTextMetrics(dcHandle, &_TextMetric);
-
-            _cxTitle = _TextMetric.tmMaxCharWidth * _wndWidth;
             SelectObject(dcHandle, hFontOld);
             ReleaseDC(wndHandle, dcHandle);
+            // ★ 行高 = 字高 + 半个字高（1.5 倍）
+            _cyRow = _TextMetric.tmHeight + _TextMetric.tmHeight / 2;
+            if (_cyRow < 20) _cyRow = 20;   // 兜底
+
+            _cxTitle = _TextMetric.tmMaxCharWidth * _wndWidth;
+            //_itemSpacing = max(2, _TextMetric.tmHeight / 6);
         }
     }
     return 0;
@@ -502,6 +506,7 @@ void CCandidateWindow::_OnLButtonDown(POINT pt)
             {
                 UINT startIdx = *_PageIndex.GetAt(0);   // 当前页起始索引
                 _currentSelection = startIdx + pos;
+                _hoverIndex = -1;                       // ← 新增
                 if (_pfnCallback)
                     _pfnCallback(_pObj, CAND_ITEM_SELECT);
                 return;
@@ -539,6 +544,7 @@ void CCandidateWindow::_OnLButtonDown(POINT pt)
         {
             SetCursor(LoadCursor(NULL, IDC_HAND));
             _currentSelection = index;
+            _hoverIndex = -1;                       // ← 新增
             _pfnCallback(_pObj, CAND_ITEM_SELECT);
             return;
         }
@@ -595,37 +601,29 @@ void CCandidateWindow::_OnLButtonUp(POINT pt)
 
 void CCandidateWindow::_OnMouseMove(POINT pt)
 {
-    int dx = pt.x - _lastMousePos.x;
-    int dy = pt.y - _lastMousePos.y;
-    if (dx * dx + dy * dy < 9)   // 3² = 9
-        return;              // 微小移动忽略，不更新参考点，也不触发选中变更
-    _lastMousePos = pt;
-    // 1. 获取当前页起始索引
+    // 命中检测：只决定 _hoverIndex，不动 _currentSelection
     int currentPage = 0;
     if (FAILED(_GetCurrentPage(&currentPage)))
         return;
     UINT startIdx = *_PageIndex.GetAt(currentPage);
 
-    // 2. 检测鼠标所在候选项
-    int newSelection = -1;
+    int newHover = -1;
 
     if (_isHorizontalMode)
     {
-        // 横向模式：遍历当前页的所有候选项
         size_t count = _horizontalItemWidths.GetCount();
         for (UINT pos = 0; pos < count; pos++)
         {
             RECT rcItem = _GetItemRect(pos);
             if (PtInRect(&rcItem, pt))
             {
-                newSelection = startIdx + pos;
+                newHover = (int)(startIdx + pos);
                 break;
             }
         }
     }
     else
     {
-        // 纵向模式：计算每行矩形
         RECT rcWindow;
         _GetClientRect(&rcWindow);
         int cyLine = _cyRow;
@@ -644,21 +642,21 @@ void CCandidateWindow::_OnMouseMove(POINT pt)
                 UINT idx = startIdx + pageCount;
                 if (idx < _candidateList.Count())
                 {
-                    newSelection = idx;
+                    newHover = (int)idx;
                     break;
                 }
             }
         }
     }
 
-    // 3. 如果找到有效候选项且与当前选中不同，则更新并重绘
-    if (newSelection != -1 && newSelection != (int)_currentSelection)
+    // 悬停项变化 → 重绘；注意不动 _currentSelection
+    if (newHover != _hoverIndex)
     {
-        _currentSelection = newSelection;
-        _InvalidateRect();  // 刷新窗口，背景色会随之改变
+        _hoverIndex = newHover;
+        _InvalidateRect();
     }
 
-    // 4. 设置光标（保持原有逻辑）
+    // 光标形状
     RECT rcWindow;
     _GetClientRect(&rcWindow);
     RECT rc = { 0 };
@@ -666,10 +664,7 @@ void CCandidateWindow::_OnMouseMove(POINT pt)
     rc.right = rcWindow.right - GetSystemMetrics(SM_CXVSCROLL) * 2;
     rc.top = rcWindow.top;
     rc.bottom = rcWindow.bottom;
-    if (PtInRect(&rc, pt))
-        SetCursor(LoadCursor(NULL, IDC_HAND));
-    else
-        SetCursor(LoadCursor(NULL, IDC_ARROW));
+    SetCursor(LoadCursor(NULL, PtInRect(&rc, pt) ? IDC_HAND : IDC_ARROW));
 }
 
 //+---------------------------------------------------------------------------
@@ -747,10 +742,13 @@ void CCandidateWindow::_DrawList(_In_ HDC dcHandle, _In_ UINT iIndex, _In_ RECT 
             GetTextExtentPoint32(dcHandle, displayBuf, (int)wcslen(displayBuf), &textSize);
 
             // ✅ 统一宽度计算公式
-            int itemWidth = numSize.cx + 4 + textSize.cx;  // 不包含 _itemSpacing
-			RECT rcItem;//背景绘制区域
-            rcItem.left = startX - 3;
-            rcItem.right = startX + itemWidth + 6;
+            int numGap = max(4, _TextMetric.tmAveCharWidth / 2);
+            int padX = _contentPadX;
+            int V = numSize.cx + numGap + textSize.cx + 2 * padX;   // 词条视觉宽度
+            int step = V + _itemSpacing;
+            RECT rcItem;
+            rcItem.left = startX - padX;
+            rcItem.right = startX - padX + V;              // 等价于 startX + numSize.cx + numGap + textSize.cx + padX
             rcItem.top = prc->top + _contentTopMargin ;
             rcItem.bottom = rcItem.top + cyLine - 1;
 
@@ -782,6 +780,22 @@ void CCandidateWindow::_DrawList(_In_ HDC dcHandle, _In_ UINT iIndex, _In_ RECT 
                     DeleteObject(hBrush);
                 }
             }
+            else if (_hoverIndex == (int)idx) {
+                // 悬停态：圆角 + 稍深背景
+                HRGN hRgn = CreateRoundRectRgn(rcItem.left, rcItem.top,
+                    rcItem.right, rcItem.bottom,
+                    roundRadius, roundRadius);
+                if (hRgn) {
+                    HBRUSH hBrush = CreateSolidBrush(_hoverBkColor);
+                    if (hBrush) { FillRgn(dcHandle, hRgn, hBrush); DeleteObject(hBrush); }
+                    DeleteObject(hRgn);
+                }
+                else {
+                    HBRUSH hBrush = CreateSolidBrush(_hoverBkColor);
+                    FillRect(dcHandle, &rcItem, hBrush);
+                    DeleteObject(hBrush);
+                }
+            }
             else {
                 // 非选中项：保持原有背景（也可改为圆角，按需调整）
                 SetBkColor(dcHandle, _backgroundColor);
@@ -805,10 +819,12 @@ void CCandidateWindow::_DrawList(_In_ HDC dcHandle, _In_ UINT iIndex, _In_ RECT 
             {
                 SetTextColor(dcHandle,  Global::candidateTextColor);
             }
-            ExtTextOut(dcHandle, startX + numSize.cx + 4, y, 0, &rcItem, displayBuf, (int)wcslen(displayBuf), NULL);
+            // 词条
+            ExtTextOut(dcHandle, startX + numSize.cx + numGap, y, 0, &rcItem,
+                displayBuf, (int)wcslen(displayBuf), NULL);
 
             // 更新下一个词条的起始位置（包含 itemSpacing）
-            startX += itemWidth + _itemSpacing;
+            startX += step;
         }
         return;
     }
@@ -831,6 +847,7 @@ void CCandidateWindow::_DrawList(_In_ HDC dcHandle, _In_ UINT iIndex, _In_ RECT 
         // 2. 填充整行背景
         BOOL isSelected = (_currentSelection == iIndex);
         BOOL isAPPRectRgn = FALSE;//是否应用圆角
+        BOOL isHover = (_hoverIndex == (int)iIndex);
         if (isSelected) {
             if (isAPPRectRgn) {
                 HRGN hRgn = CreateRoundRectRgn(rcRow.left, rcRow.top, rcRow.right, rcRow.bottom, roundRadius, roundRadius);
@@ -847,6 +864,12 @@ void CCandidateWindow::_DrawList(_In_ HDC dcHandle, _In_ UINT iIndex, _In_ RECT 
                 DeleteObject(hBrush);
             }
             SetTextColor(dcHandle, CANDWND_SELECTED_ITEM_COLOR);
+        }
+        else if (isHover) {
+            HBRUSH hBrush = CreateSolidBrush(_hoverBkColor);
+            FillRect(dcHandle, &rcRow, hBrush);
+            DeleteObject(hBrush);
+            SetTextColor(dcHandle, CANDWND_NUM_COLOR);
         }
         else {
             HBRUSH hBrush = CreateSolidBrush(_backgroundColor);
@@ -1040,6 +1063,7 @@ void CCandidateWindow::_ClearList()
         delete [] pItemList->_ItemString.Get();
         delete [] pItemList->_FindKeyCode.Get();
     }
+    _hoverIndex = -1;
     _currentSelection = 0;
     _candidateList.Clear();
     _PageIndex.Clear();
@@ -1722,10 +1746,13 @@ void CCandidateWindow::_AdjustWindowSizeForHorizontal(HDC dcHandle)
     }
     // 清空并重新填充
     _horizontalItemWidths.RemoveAll();
-    int totalWidth = _contentLeftMargin * 2;   // 改用 _contentLeftMargin
+    // 原来：int totalWidth = _contentLeftMargin * 2;
+    int totalWidth = (_contentLeftMargin - _contentPadX) * 2;
     WCHAR numBuf[16];
     WCHAR displayBuf[256];
     SIZE numSize = { 0 }, textSize = { 0 };
+    int numGap = max(4, _TextMetric.tmAveCharWidth / 2);
+    int padX = _contentPadX;
 
     for (int pos = 0; pos < actualCount; pos++)
     {
@@ -1734,17 +1761,21 @@ void CCandidateWindow::_AdjustWindowSizeForHorizontal(HDC dcHandle)
         if (!pItem) continue;
 
         _BuildDisplayString(pItem, (pos == 0),displayBuf, ARRAYSIZE(displayBuf));
-        StringCchPrintf(numBuf, ARRAYSIZE(numBuf), L"%d.", pos + 1);
+        StringCchPrintf(numBuf, ARRAYSIZE(numBuf), L"%d", pos + 1);
 
         GetTextExtentPoint32(dcHandle, numBuf, (int)wcslen(numBuf), &numSize);
         GetTextExtentPoint32(dcHandle, displayBuf, (int)wcslen(displayBuf), &textSize);
 
         // 统一宽度计算公式
-        int itemWidth = numSize.cx + 4 + textSize.cx + _itemSpacing;
-        _horizontalItemWidths.Add(itemWidth);
-        totalWidth += itemWidth;
+
+        int V = numSize.cx + numGap + textSize.cx + 2 * padX;
+        int step = V + _itemSpacing;
+
+        _horizontalItemWidths.Add(step);   // ★ 只加一次
+        totalWidth += step;                // ★ 只累加一次
     }
-    if(actualCount>4)totalWidth -= 20;
+    if (actualCount > 0)
+        totalWidth -= _itemSpacing;        // ★ 去掉最后一项的尾随 spacing
     if (totalWidth != _cxTitle && totalWidth > 0)
     {
         _cxTitle = totalWidth;
@@ -1787,10 +1818,10 @@ RECT CCandidateWindow::_GetItemRect(int pos)
 {
     RECT rc = { 0,0,0,0 };
     if (!_isHorizontalMode || pos < 0 || pos >= (int)_horizontalItemWidths.GetCount()) return rc;
-    int left = _contentLeftMargin;   // 原为 _horizontalLeftMargin
+    int left = _contentLeftMargin - _contentPadX;   // 原为 _horizontalLeftMargin
     for (int i = 0; i < pos; i++) left += _horizontalItemWidths[i];
     rc.left = left;
-    rc.right = left + _horizontalItemWidths[pos];
+    rc.right = left + _horizontalItemWidths[pos] - _itemSpacing;   // 去掉尾随间距
     rc.top = _contentTopMargin;
     rc.bottom = rc.top + _cyRow;
     return rc;
@@ -1858,27 +1889,34 @@ void CCandidateWindow::SetHorizontalMode(BOOL isHorizontal, UINT maxItems, int s
     _isHorizontalMode = isHorizontal;
     _maxHorizontalItems = maxItems;
     _itemSpacing = spacing;
-
+    // 取有效的字体度量；若未就绪（构造期）退回默认
+    int fontH = (_TextMetric.tmHeight > 0) ? _TextMetric.tmHeight : 18;
+    int avgChW = (_TextMetric.tmAveCharWidth > 0) ? _TextMetric.tmAveCharWidth : fontH / 2;
     // ---------- 根据模式设置所有样式参数 ----------
     if (_isHorizontalMode) {
         // 横向（五笔）样式
         _backgroundColor = Global::candidateBgColor;//RGB(245, 255, 236);
         _selectedBkColor = Global::candidateSelectedBgColor;//RGB(0, 120, 215);
         _selectedTextColor = Global::candidateSelectedTextColor;//RGB(255, 255, 255);
-        _roundCornerRadius = 12;
-        _contentLeftMargin = 12;
-        _contentTopMargin = 4;
+        _roundCornerRadius = fontH / 2;          // 圆角随字号
+        _contentLeftMargin = avgChW * 2;             // 约 1 个字宽
+        _contentTopMargin = fontH / 4;          // 约 1/4 字高
+       
     }
     else {
         // 纵向（拼音）样式
         _backgroundColor = GetSysColor(COLOR_WINDOW);
         _selectedBkColor = RGB(104, 148, 0);
         _selectedTextColor = RGB(255, 255, 255);
-        _roundCornerRadius = 16;
-        _contentLeftMargin = 0;
+        _roundCornerRadius = fontH / 2;;
+        _contentLeftMargin = avgChW;
         _contentTopMargin = 0;
     }
-
+    _contentPadX = max(6, avgChW);   // 与 _DrawList 里 padX 口径一致  _contentPadX词条左右内边距（由字号派生）
+    _hoverBkColor = RGB(
+        (BYTE)(GetRValue(_backgroundColor) * 0.90),
+        (BYTE)(GetGValue(_backgroundColor) * 0.90),
+        (BYTE)(GetBValue(_backgroundColor) * 0.90));
     // 重建背景画刷
     if (_brshBkColor) DeleteObject(_brshBkColor);
     _brshBkColor = CreateSolidBrush(_backgroundColor);

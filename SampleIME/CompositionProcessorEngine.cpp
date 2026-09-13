@@ -399,6 +399,12 @@ void CCompositionProcessorEngine::LoadConfig()
     }
     Global::nMaxHorizontalItems = GetPrivateProfileInt(L"Settings", L"MaxHorizontalItems", 5, szConfigPath);
     Global::nMaxVerticalItems = GetPrivateProfileInt(L"Settings", L"MaxVerticalItems", 10, szConfigPath);
+    Global::nFontSize = GetPrivateProfileInt(L"Settings", L"FontSize", 18, szConfigPath);
+    GetPrivateProfileString(L"Settings", L"FontName", L"微软雅黑",Global::fontName, 50, szConfigPath);
+	Global::nBOLD = GetPrivateProfileInt(L"Settings", L"FontBold", 1, szConfigPath);
+    // 简单越界保护
+    if (Global::nFontSize < 8)  Global::nFontSize = 8;
+    if (Global::nFontSize > 72) Global::nFontSize = 72;
     // ---- 新增读取 ----
     // ShowRemainingCode
     Global::showRemainingCode = (GetPrivateProfileInt(L"Settings", L"ShowRemainingCode", 1, szConfigPath) != 0);
@@ -1943,15 +1949,49 @@ void CCompositionProcessorEngine::SetDefaultCandidateTextFont()
     // Candidate Text Font
     if (Global::defaultlFontHandle == nullptr)
     {
-		WCHAR fontName[50] = {'\0'}; 
-		LoadString(Global::dllInstanceHandle, IDS_DEFAULT_FONT, fontName, 50);
-        Global::defaultlFontHandle = CreateFont(-MulDiv(10, GetDeviceCaps(GetDC(NULL), LOGPIXELSY), 72), 0, 0, 0, FW_MEDIUM, 0, 0, 0, 0, 0, 0, 0, 0, fontName);
+		//WCHAR fontName[50] = {'\0'}; 
+		//LoadString(Global::dllInstanceHandle, IDS_DEFAULT_FONT, fontName, 50);
+        // 字重映射
+        int lfWeight = FW_NORMAL;
+        switch (Global::nBOLD)
+        {
+        case 1: lfWeight = FW_MEDIUM;   break;
+        case 2: lfWeight = FW_SEMIBOLD; break;
+        case 3: lfWeight = FW_BOLD;     break;
+        default: lfWeight = FW_NORMAL;  break;
+        }
+        OutputDebugString(L"[Font] name=");
+        OutputDebugString(Global::fontName);
+        WCHAR dbg[64];
+        StringCchPrintf(dbg, 64, L"[Font] size=%d, bold=%d\n", Global::nFontSize, Global::nBOLD);
+        OutputDebugString(dbg);
+
+        Global::defaultlFontHandle = CreateFont(-Global::nFontSize, 0, 0, 0, 
+            lfWeight,  //FW_SEMIBOLD半粗 /FW_BOLD :粗
+            0, 0, 0,
+            DEFAULT_CHARSET,           // 或 0，建议明确 charset
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            DEFAULT_PITCH | FF_DONTCARE,
+			Global::fontName  // 例如 "Microsoft YaHei" 或 "微软雅黑"
+        );
         if (!Global::defaultlFontHandle)
         {
 			LOGFONT lf;
 			SystemParametersInfo(SPI_GETICONTITLELOGFONT, sizeof(LOGFONT), &lf, 0);
             // Fall back to the default GUI font on failure.
-            Global::defaultlFontHandle = CreateFont(-MulDiv(10, GetDeviceCaps(GetDC(NULL), LOGPIXELSY), 72), 0, 0, 0, FW_MEDIUM, 0, 0, 0, 0, 0, 0, 0, 0, lf.lfFaceName);
+            Global::defaultlFontHandle = CreateFont(-Global::nFontSize, 0, 0, 0, FW_MEDIUM, 0, 0, 0, 0, 0, 0, 0, 0, lf.lfFaceName);
+        }else {
+            HDC hdc = GetDC(NULL);
+            HFONT hOld = (HFONT)SelectObject(hdc, Global::defaultlFontHandle);
+            WCHAR actualFace[LF_FACESIZE] = { 0 };
+            GetTextFace(hdc, LF_FACESIZE, actualFace);
+            SelectObject(hdc, hOld);
+            ReleaseDC(NULL, hdc);
+            OutputDebugString(L"[Font] actual=");
+            OutputDebugString(actualFace);
+            OutputDebugString(L"\n");
         }
     }
 }

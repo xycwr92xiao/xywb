@@ -29,13 +29,14 @@ private:
 
 typedef struct KeyHandlerEditSessionDTO
 {
-    KeyHandlerEditSessionDTO::KeyHandlerEditSessionDTO(TfEditCookie tFEC, _In_ ITfContext *pTfContext, UINT virualCode, WCHAR inputChar, KEYSTROKE_FUNCTION arrowKeyFunction)
+    KeyHandlerEditSessionDTO::KeyHandlerEditSessionDTO(TfEditCookie tFEC, _In_ ITfContext *pTfContext, UINT virualCode, WCHAR inputChar, KEYSTROKE_FUNCTION arrowKeyFunction, UINT vk)
     {
         ec = tFEC;
         pContext = pTfContext;
         code = virualCode;
         wch = inputChar;
         arrowKey = arrowKeyFunction;
+        vkCode = vk;            // 新增
     }
 
     TfEditCookie ec;
@@ -43,6 +44,7 @@ typedef struct KeyHandlerEditSessionDTO
     UINT code;
     WCHAR wch;
     KEYSTROKE_FUNCTION arrowKey;
+    UINT vkCode;                // 新增：原始虚拟键码
 }KeyHandlerEditSessionDTO;
 
 class CKeyStateCategory

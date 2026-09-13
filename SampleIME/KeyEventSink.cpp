@@ -32,7 +32,7 @@ public:
 #define THIRDPARTY_NEXTPAGE  static_cast<WORD>(0xF003)
 #define THIRDPARTY_PREVPAGE  static_cast<WORD>(0xF004)
 
-// Because the code mostly works with VKeys, here map a WCHAR back to a VKKey for certain
+// Because the code mostly works with VKeys, here map a WCHAR back to a VKKey for certain领用单
 // vkeys that the IME handles specially
 __inline UINT VKeyFromVKPacketAndWchar(UINT vk, WCHAR wch)
 {
@@ -94,6 +94,7 @@ BOOL CSampleIME::_IsKeyEaten(_In_ ITfContext *pContext, UINT codeIn, _Out_ UINT 
     {
         pKeyState->Category = CATEGORY_NONE;
         pKeyState->Function = FUNCTION_NONE;
+        pKeyState->uVKey = codeIn;   // 新增
     }
     if (pwch)
     {
@@ -303,7 +304,39 @@ STDAPI CSampleIME::OnSetFocus(BOOL fForeground)
 
     return S_OK;
 }
-
+// 在 KeyEventSink.cpp 顶部或文件末尾添加
+static void UpdateRecentHanziFromClipboard()
+{
+    WCHAR clipboardHanzi[16] = { 0 };
+    HWND hwnd = GetForegroundWindow();  // 使用当前前台窗口作为所有者
+    if (OpenClipboard(hwnd))
+    {
+        HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+        if (hData)
+        {
+            LPCWSTR pClip = (LPCWSTR)GlobalLock(hData);
+            if (pClip)
+            {
+                int idx = 0;
+                // 提取前15个汉字（CJK统一汉字范围 0x4E00~0x9FFF）
+                for (int i = 0; pClip[i] && idx < 15; i++)
+                {
+                    if (pClip[i] >= 0x4E00 && pClip[i] <= 0x9FFF)
+                    {
+                        clipboardHanzi[idx++] = pClip[i];
+                    }
+                }
+                if (idx > 0)
+                {
+                    clipboardHanzi[idx] = L'\0';
+                    wcsncpy_s(Global::m_recentHanzi, _countof(Global::m_recentHanzi), clipboardHanzi, _TRUNCATE);
+                }
+                GlobalUnlock(hData);
+            }
+        }
+        CloseClipboard();
+    }
+}
 //+---------------------------------------------------------------------------
 //
 // ITfKeyEventSink::OnTestKeyDown
@@ -319,6 +352,10 @@ STDAPI CSampleIME::OnTestKeyDown(ITfContext* pContext, WPARAM wParam, LPARAM lPa
         return S_OK;   // 无上下文，不处理按键
     }
     Global::UpdateModifiers(wParam, lParam);
+    if (wParam >= '0' && wParam <= '9' || (wParam >= VK_NUMPAD0 && wParam <= VK_NUMPAD9))   // 主键盘数字 0-9
+    {
+        Global::lastDigitPressTime = GetTickCount64();
+    }
     // ========== 新增：处理左 Ctrl 按下 ==========
     BOOL isInputKey = (wParam >= 'A' && wParam <= 'Z') ||
         (wParam >= '0' && wParam <= '9') ||
@@ -427,6 +464,10 @@ STDAPI CSampleIME::OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam,
         return S_OK;   // 无上下文，不处理按键
     }
     Global::UpdateModifiers(wParam, lParam);
+    if (wParam >= '0' && wParam <= '9' || (wParam >= VK_NUMPAD0 && wParam <= VK_NUMPAD9))   // 主键盘数字 0-9
+    {
+        Global::lastDigitPressTime = GetTickCount64();
+    }
     BOOL isInputKey = (wParam >= 'A' && wParam <= 'Z') ||
         (wParam >= '0' && wParam <= '9') ||
         wParam == VK_TAB ||
@@ -615,7 +656,11 @@ STDAPI CSampleIME::OnTestKeyUp(ITfContext* pContext, WPARAM wParam, LPARAM lPara
 STDAPI CSampleIME::OnKeyUp(ITfContext *pContext, WPARAM wParam, LPARAM lParam, BOOL *pIsEaten)
 {
     Global::UpdateModifiers(wParam, lParam);
-
+    if (wParam == 'C' && (GetKeyState(VK_CONTROL) & 0x8000))
+    {
+        UpdateRecentHanziFromClipboard();
+        // 不修改 *pIsEaten，让应用程序正常处理 Ctrl+C
+    }
     if (wParam == VK_SHIFT) {
         UINT scanCode = (lParam >> 16) & 0xFF;
         BOOL isRightShift = (scanCode == 0x36);
@@ -656,9 +701,9 @@ STDAPI CSampleIME::OnKeyUp(ITfContext *pContext, WPARAM wParam, LPARAM lParam, B
         {
             ULONGLONG duration = GetTickCount64() - _ctrlKeyDownTime;
             if (isLeftCtrl) {
-                if (duration < 400) {
-                    Beep(800, 100);
-                    OnChangeWubiOrPying(pContext);
+                if (duration < 100) {
+                   // Beep(800, 100);
+                   // OnChangeWubiOrPying(pContext);
                 }
                 else {
                     // 长按左 Ctrl 处理（可选）

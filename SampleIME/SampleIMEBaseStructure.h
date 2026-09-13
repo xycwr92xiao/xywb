@@ -89,6 +89,7 @@ struct _KEYSTROKE_STATE
 {
     KEYSTROKE_CATEGORY Category;
     KEYSTROKE_FUNCTION Function;
+    UINT uVKey;   // 新增：保存原始虚拟键码
 };
 
 struct _PUNCTUATION

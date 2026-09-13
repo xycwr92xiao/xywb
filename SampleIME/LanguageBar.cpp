@@ -84,7 +84,16 @@ void LoadIniSettings()
 
     val = GetPrivateProfileInt(L"Settings", L"MaxVerticalItems", 10, szIni);
     g_maxCandidatesVertical = max(3, min(10, val));
-
+    val = GetPrivateProfileInt(L"Settings", L"FontSize", 18, szIni);
+    if (val < 12) val = 12;
+    if (val > 32) val = 32;
+    Global::nFontSize = val;
+    GetPrivateProfileString(L"Settings", L"FontName", L"微软雅黑",
+        Global::fontName, LF_FACESIZE, szIni);
+    val = GetPrivateProfileInt(L"Settings", L"FontBold", 0, szIni);
+    if (val < 0) val = 0;
+    if (val > 3) val = 3;
+    Global::nBOLD = val;
     val = GetPrivateProfileInt(L"Settings", L"ShowRemainingCode", 1, szIni);
     g_showRemainingCode = (val == 1);
 
@@ -158,7 +167,12 @@ void SaveIniSettings()
 
     wsprintf(szBuf, L"%d", g_showRemainingCode ? 1 : 0);
     WritePrivateProfileString(L"Settings", L"ShowRemainingCode", szBuf, szIni);
+    wsprintf(szBuf, L"%d", Global::nFontSize);
+    WritePrivateProfileString(L"Settings", L"FontSize", szBuf, szIni);
+    WritePrivateProfileString(L"Settings", L"FontName", Global::fontName, szIni);
 
+    wsprintf(szBuf, L"%d", Global::nBOLD);
+    WritePrivateProfileString(L"Settings", L"FontBold", szBuf, szIni);
     // 颜色保存为十六进制 "0xRRGGBB"
     auto WriteColor = [&](LPCWSTR key, COLORREF clr) {
         wsprintf(szBuf, L"0x%06X", clr);
@@ -1037,6 +1051,13 @@ namespace {
 #define IDC_SETTINGS_STATIC_TOOLBARCOLOR 3313
 #define IDC_SETTINGS_STATIC_TOOLBARBG    3314
 #define IDC_SETTINGS_STATIC_TOOLBARHOVER 3315
+#define IDC_SETTINGS_STATIC_FONTSIZE     3316
+#define IDC_SETTINGS_EDIT_FONTSIZE       3105
+#define IDC_SETTINGS_SPIN_FONTSIZE       3106
+#define IDC_SETTINGS_STATIC_FONTNAME     3317
+#define IDC_SETTINGS_COMBO_FONTNAME      3107
+#define IDC_SETTINGS_STATIC_FONTBOLD     3318
+#define IDC_SETTINGS_COMBO_FONTBOLD      3108
 
     struct SettingsDlgControls {
         HWND hTab;
@@ -1049,9 +1070,15 @@ namespace {
         HWND hShowToolBar;
         HWND hHVToolBar;
         // 第二页控件
+        HWND hStaticFontSize;
+        HWND hEditFontSize;
+        HWND hSpinFontSize;
+
         HWND hComboArrange;
         HWND hEditHorizontal;
+        HWND hSpinHorizontal;
         HWND hEditVertical;
+        HWND hSpinVertical;
         HWND hCheckShowRemain;
         HWND hBtnCandBg;
         HWND hBtnCandText;
@@ -1062,8 +1089,6 @@ namespace {
         HWND hStaticArrange;
         HWND hStaticHorizontal;
         HWND hStaticVertical;
-        HWND hStaticHorizNote;
-        HWND hStaticVertNote;
         HWND hStaticCandColor;
         HWND hStaticCandBg;
         HWND hStaticCandText;
@@ -1072,6 +1097,10 @@ namespace {
         HWND hStaticToolbarColor;
         HWND hStaticToolbarBg;
         HWND hStaticToolbarHover;
+        HWND hStaticFontName;
+        HWND hComboFontName;
+        HWND hStaticFontBold;
+        HWND hComboFontBold;
         // 颜色值
         COLORREF candBg;
         COLORREF candText;
@@ -1125,17 +1154,37 @@ namespace {
 
             TCITEM tie = { 0 };
             tie.mask = TCIF_TEXT;
-            WCHAR szTab1[] = L"模式设置";
-            WCHAR szTab2[] = L"窗口设置";
+            WCHAR szTab1[] = L"模式布局";
+            WCHAR szTab2[] = L"候选窗口";
             tie.pszText = szTab1;
             TabCtrl_InsertItem(pCtrl->hTab, 0, &tie);
             tie.pszText = szTab2;
             TabCtrl_InsertItem(pCtrl->hTab, 1, &tie);
 
+            // ---- 获取DPI ----
+            UINT dpi = 96;
+            {
+                HMODULE hUser32 = GetModuleHandleW(L"user32.dll");
+                typedef UINT(WINAPI* PFN_GetDpiForWindow)(HWND);
+                PFN_GetDpiForWindow pGetDpiForWindow =
+                    hUser32 ? (PFN_GetDpiForWindow)GetProcAddress(hUser32, "GetDpiForWindow") : nullptr;
+                if (pGetDpiForWindow)
+                {
+                    dpi = pGetDpiForWindow(hDlg);
+                }
+                else
+                {
+                    HDC hdc = GetDC(hDlg);
+                    dpi = GetDeviceCaps(hdc, LOGPIXELSY);
+                    ReleaseDC(hDlg, hdc);
+                }
+            }
             // ---- 页签1 ----
-            pCtrl->hCheckChinese = CreateWindow(L"BUTTON", L"初始默认中文",
+            // 100%（96 DPI）时补 4 像素，其他缩放比例不补
+            int widthSet = -((int)dpi - 120) / 6;
+            pCtrl->hCheckChinese = CreateWindow(L"BUTTON", L"初始默认中文（所有设置可能重开应用才能生效）",
                 WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                30, 50, 180, 24,
+                30, 50, 380, 24,
                 hDlg, (HMENU)IDC_SETTINGS_CHECK_CHINESE, hInst, NULL);
             SendMessage(pCtrl->hCheckChinese, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
 
@@ -1147,89 +1196,162 @@ namespace {
 
             pCtrl->hComboInputMode = CreateWindow(L"COMBOBOX", NULL,
                 WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
-                160, 85, 140, 100,
+                170, 85, 140 + widthSet, 100,
                 hDlg, (HMENU)IDC_SETTINGS_COMBO_INPUTMODE, hInst, NULL);
             SendMessage(pCtrl->hComboInputMode, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
             SendMessage(pCtrl->hComboInputMode, CB_ADDSTRING, 0, (LPARAM)L"五笔");
             SendMessage(pCtrl->hComboInputMode, CB_ADDSTRING, 0, (LPARAM)L"拼音");
             SendMessage(pCtrl->hComboInputMode, CB_ADDSTRING, 0, (LPARAM)L"拼音+五笔混合");
-
-            pCtrl->hStaticShortcut = CreateWindow(L"STATIC", L"手工造词快捷键：Ctrl+",
+            pCtrl->hStaticArrange = CreateWindow(L"STATIC", L"候选词条排列方式：",
                 WS_CHILD | WS_VISIBLE | SS_LEFT,
-                33, 128, 200, 24,
-                hDlg, (HMENU)IDC_SETTINGS_STATIC_SHORTCUT, hInst, NULL);
-            SendMessage(pCtrl->hStaticShortcut, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
-
-            pCtrl->hEditShortcut = CreateWindow(L"EDIT", NULL,
-                WS_CHILD | WS_VISIBLE | WS_BORDER | ES_UPPERCASE | ES_AUTOHSCROLL,
-                185, 125, 30, 24,
-                hDlg, (HMENU)IDC_SETTINGS_EDIT_SHORTCUT, hInst, NULL);
-            SendMessage(pCtrl->hEditShortcut, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
-            SendMessage(pCtrl->hEditShortcut, EM_LIMITTEXT, 1, 0);
-
-            pCtrl->hShowToolBar = CreateWindow(L"BUTTON", L"初始显示工具栏",
-                WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                30, 170, 180, 24,
-                hDlg, (HMENU)IDC_SETTINGS_CHECK_CHINESE, hInst, NULL);
-            SendMessage(pCtrl->hShowToolBar, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
-
-            pCtrl->hHVToolBar = CreateWindow(L"BUTTON", L"水平(不勾则垂直)工具栏",
-                WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-                30, 210, 180, 24,
-                hDlg, (HMENU)IDC_SETTINGS_CHECK_CHINESE, hInst, NULL);
-            SendMessage(pCtrl->hHVToolBar, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
-
-            // ---- 页签2 ----
-            pCtrl->hStaticArrange = CreateWindow(L"STATIC", L"候选窗口排列方式：",
-                WS_CHILD | WS_VISIBLE | SS_LEFT,
-                30, 53, 130, 24,
+                30, 123, 130, 24,
                 hDlg, (HMENU)IDC_SETTINGS_STATIC_ARRANGE, hInst, NULL);
             SendMessage(pCtrl->hStaticArrange, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
 
             pCtrl->hComboArrange = CreateWindow(L"COMBOBOX", NULL,
                 WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
-                170, 50, 100, 100,
+                170, 120, 140 + widthSet, 100,
                 hDlg, (HMENU)IDC_SETTINGS_COMBO_ARRANGE, hInst, NULL);
             SendMessage(pCtrl->hComboArrange, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
             SendMessage(pCtrl->hComboArrange, CB_ADDSTRING, 0, (LPARAM)L"横向");
             SendMessage(pCtrl->hComboArrange, CB_ADDSTRING, 0, (LPARAM)L"纵向");
-
-            pCtrl->hStaticHorizontal = CreateWindow(L"STATIC", L"横向最大词条数：",
+            //
+            // 
+            pCtrl->hStaticHorizontal = CreateWindow(L"STATIC", L"横向最大词条数(3-10)：",
                 WS_CHILD | WS_VISIBLE | SS_LEFT,
-                30, 88, 130, 24,
+                30, 163, 170, 24,
                 hDlg, (HMENU)IDC_SETTINGS_STATIC_HORIZONTAL, hInst, NULL);
             SendMessage(pCtrl->hStaticHorizontal, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
 
             pCtrl->hEditHorizontal = CreateWindow(L"EDIT", NULL,
-                WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
-                170, 85, 50, 24,
+                WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_RIGHT | ES_AUTOHSCROLL,
+                250, 158, 80, 24,
                 hDlg, (HMENU)IDC_SETTINGS_EDIT_HORIZONTAL, hInst, NULL);
             SendMessage(pCtrl->hEditHorizontal, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
+            pCtrl->hSpinHorizontal = CreateWindow(UPDOWN_CLASS, NULL,
+                WS_CHILD | WS_VISIBLE | UDS_SETBUDDYINT | UDS_ALIGNRIGHT
+                | UDS_ARROWKEYS | UDS_NOTHOUSANDS | UDS_AUTOBUDDY,
+                0, 0, 0, 0,
+                hDlg, (HMENU)IDC_SETTINGS_SPIN_FONTSIZE, hInst, NULL);
+            SendMessage(pCtrl->hSpinHorizontal, UDM_SETBUDDY, (WPARAM)pCtrl->hEditHorizontal, 0);
+            // 范围：低位字=最大值，高位字=最小值
+            SendMessage(pCtrl->hSpinHorizontal, UDM_SETRANGE, 0, MAKELPARAM(10, 3));
+            SendMessage(pCtrl->hSpinHorizontal, UDM_SETPOS, 0, MAKELPARAM(g_maxCandidatesHorizontal, 0));
 
-            pCtrl->hStaticHorizNote = CreateWindow(L"STATIC", L"(3-10)",
+            pCtrl->hStaticVertical = CreateWindow(L"STATIC", L"纵向最大词条数(3-10)：",
                 WS_CHILD | WS_VISIBLE | SS_LEFT,
-                230, 85, 50, 24,
-                hDlg, (HMENU)IDC_SETTINGS_STATIC_HORIZ_NOTE, hInst, NULL);
-            SendMessage(pCtrl->hStaticHorizNote, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
-
-            pCtrl->hStaticVertical = CreateWindow(L"STATIC", L"纵向最大词条数：",
-                WS_CHILD | WS_VISIBLE | SS_LEFT,
-                30, 123, 130, 24,
+                30, 203, 170, 24,
                 hDlg, (HMENU)IDC_SETTINGS_STATIC_VERTICAL, hInst, NULL);
             SendMessage(pCtrl->hStaticVertical, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
 
             pCtrl->hEditVertical = CreateWindow(L"EDIT", NULL,
-                WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
-                170, 120, 50, 24,
+                WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_RIGHT | ES_AUTOHSCROLL,
+                250, 198, 80, 24,
                 hDlg, (HMENU)IDC_SETTINGS_EDIT_VERTICAL, hInst, NULL);
             SendMessage(pCtrl->hEditVertical, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
+            pCtrl->hSpinVertical = CreateWindow(UPDOWN_CLASS, NULL,
+                WS_CHILD | WS_VISIBLE | UDS_SETBUDDYINT | UDS_ALIGNRIGHT
+                | UDS_ARROWKEYS | UDS_NOTHOUSANDS | UDS_AUTOBUDDY,
+                0, 0, 0, 0,
+                hDlg, (HMENU)IDC_SETTINGS_SPIN_FONTSIZE, hInst, NULL);
+            SendMessage(pCtrl->hSpinVertical, UDM_SETBUDDY, (WPARAM)pCtrl->hEditVertical, 0);
+            // 范围：低位字=最大值，高位字=最小值
+            SendMessage(pCtrl->hSpinVertical, UDM_SETRANGE, 0, MAKELPARAM(10, 3));
+            SendMessage(pCtrl->hSpinVertical, UDM_SETPOS, 0, MAKELPARAM(g_maxCandidatesVertical, 0));
 
-            pCtrl->hStaticVertNote = CreateWindow(L"STATIC", L"(3-10)",
+            pCtrl->hShowToolBar = CreateWindow(L"BUTTON", L"初始显示工具栏",
+                WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                30, 253, 180, 24,
+                hDlg, (HMENU)IDC_SETTINGS_CHECK_CHINESE, hInst, NULL);
+            SendMessage(pCtrl->hShowToolBar, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
+
+            pCtrl->hHVToolBar = CreateWindow(L"BUTTON", L"水平(不勾则垂直)工具栏",
+                WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                30, 291, 180, 24,
+                hDlg, (HMENU)IDC_SETTINGS_CHECK_CHINESE, hInst, NULL);
+            SendMessage(pCtrl->hHVToolBar, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
+
+            pCtrl->hStaticShortcut = CreateWindow(L"STATIC", L"手工造词快捷键：Ctrl+",
                 WS_CHILD | WS_VISIBLE | SS_LEFT,
-                230, 120, 50, 24,
-                hDlg, (HMENU)IDC_SETTINGS_STATIC_VERT_NOTE, hInst, NULL);
-            SendMessage(pCtrl->hStaticVertNote, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
+                30, 329, 200, 24,
+                hDlg, (HMENU)IDC_SETTINGS_STATIC_SHORTCUT, hInst, NULL);
+            SendMessage(pCtrl->hStaticShortcut, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
 
+            pCtrl->hEditShortcut = CreateWindow(L"EDIT", NULL,
+                WS_CHILD | WS_VISIBLE | WS_BORDER | ES_UPPERCASE | ES_AUTOHSCROLL,
+                185, 326, 30, 24,
+                hDlg, (HMENU)IDC_SETTINGS_EDIT_SHORTCUT, hInst, NULL);
+            SendMessage(pCtrl->hEditShortcut, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
+            SendMessage(pCtrl->hEditShortcut, EM_LIMITTEXT, 1, 0);
+
+            // ---- 页签2：字号设置（顶部）----
+            pCtrl->hStaticFontSize = CreateWindow(L"STATIC", L"候选文本字号(12-32)以下重开应用生效：",
+                WS_CHILD | WS_VISIBLE | SS_LEFT,
+                30, 53, 270, 24,
+                hDlg, (HMENU)IDC_SETTINGS_STATIC_FONTSIZE, hInst, NULL);
+            SendMessage(pCtrl->hStaticFontSize, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
+
+            pCtrl->hEditFontSize = CreateWindow(L"EDIT", NULL,
+                WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER | ES_RIGHT | ES_AUTOHSCROLL,
+                320, 49, 80, 24,
+                hDlg, (HMENU)IDC_SETTINGS_EDIT_FONTSIZE, hInst, NULL);
+            SendMessage(pCtrl->hEditFontSize, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
+
+            // UpDown 微调控件：绑定到编辑框右侧
+            pCtrl->hSpinFontSize = CreateWindow(UPDOWN_CLASS, NULL,
+                WS_CHILD | WS_VISIBLE | UDS_SETBUDDYINT | UDS_ALIGNRIGHT
+                | UDS_ARROWKEYS | UDS_NOTHOUSANDS | UDS_AUTOBUDDY,
+                0, 0, 0, 0,
+                hDlg, (HMENU)IDC_SETTINGS_SPIN_FONTSIZE, hInst, NULL);
+            SendMessage(pCtrl->hSpinFontSize, UDM_SETBUDDY, (WPARAM)pCtrl->hEditFontSize, 0);
+            // 范围：低位字=最大值，高位字=最小值
+            SendMessage(pCtrl->hSpinFontSize, UDM_SETRANGE, 0, MAKELPARAM(32, 12));
+            SendMessage(pCtrl->hSpinFontSize, UDM_SETPOS, 0, MAKELPARAM(Global::nFontSize, 0));
+
+            // ---- 页签2：候选字体 ----
+            pCtrl->hStaticFontName = CreateWindow(L"STATIC", L"候选字体：",
+                WS_CHILD | WS_VISIBLE | SS_LEFT,
+                30, 87, 150, 24,
+                hDlg, (HMENU)IDC_SETTINGS_STATIC_FONTNAME, hInst, NULL);
+            SendMessage(pCtrl->hStaticFontName, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
+
+            pCtrl->hComboFontName = CreateWindow(L"COMBOBOX", NULL,
+                WS_CHILD | WS_VISIBLE | CBS_DROPDOWN | CBS_HASSTRINGS | WS_VSCROLL,
+                120, 82, 260 + widthSet, 200,
+                hDlg, (HMENU)IDC_SETTINGS_COMBO_FONTNAME, hInst, NULL);
+            SendMessage(pCtrl->hComboFontName, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
+            // 常用字体下拉项
+            SendMessage(pCtrl->hComboFontName, CB_ADDSTRING, 0, (LPARAM)L"微软雅黑");
+            SendMessage(pCtrl->hComboFontName, CB_ADDSTRING, 0, (LPARAM)L"宋体");
+            SendMessage(pCtrl->hComboFontName, CB_ADDSTRING, 0, (LPARAM)L"黑体");
+            SendMessage(pCtrl->hComboFontName, CB_ADDSTRING, 0, (LPARAM)L"楷体");
+            SendMessage(pCtrl->hComboFontName, CB_ADDSTRING, 0, (LPARAM)L"隶书");
+            SendMessage(pCtrl->hComboFontName, CB_ADDSTRING, 0, (LPARAM)L"幼圆");
+            SendMessage(pCtrl->hComboFontName, CB_ADDSTRING, 0, (LPARAM)L"华文行楷");
+            SendMessage(pCtrl->hComboFontName, CB_ADDSTRING, 0, (LPARAM)L"等线");
+            SendMessage(pCtrl->hComboFontName, CB_ADDSTRING, 0, (LPARAM)L"仿宋");
+            SendMessage(pCtrl->hComboFontName, CB_ADDSTRING, 0, (LPARAM)L"Arial");
+            SendMessage(pCtrl->hComboFontName, CB_ADDSTRING, 0, (LPARAM)L"Times New Roman");
+            // 初始值用 SetWindowText，兼容列表外的自定义字体名
+            SetWindowText(pCtrl->hComboFontName, Global::fontName);
+
+            // ---- 页签2：字体加粗 ----
+            pCtrl->hStaticFontBold = CreateWindow(L"STATIC", L"字体加粗：",
+                WS_CHILD | WS_VISIBLE | SS_LEFT,
+                30, 121, 150, 24,
+                hDlg, (HMENU)IDC_SETTINGS_STATIC_FONTBOLD, hInst, NULL);
+            SendMessage(pCtrl->hStaticFontBold, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
+
+            pCtrl->hComboFontBold = CreateWindow(L"COMBOBOX", NULL,
+                WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | CBS_HASSTRINGS,
+                120, 116, 260 + widthSet, 120,
+                hDlg, (HMENU)IDC_SETTINGS_COMBO_FONTBOLD, hInst, NULL);
+            SendMessage(pCtrl->hComboFontBold, WM_SETFONT, (WPARAM)pCtrl->hBFont, TRUE);
+            SendMessage(pCtrl->hComboFontBold, CB_ADDSTRING, 0, (LPARAM)L"正常");
+            SendMessage(pCtrl->hComboFontBold, CB_ADDSTRING, 0, (LPARAM)L"中等");
+            SendMessage(pCtrl->hComboFontBold, CB_ADDSTRING, 0, (LPARAM)L"半粗");
+            SendMessage(pCtrl->hComboFontBold, CB_ADDSTRING, 0, (LPARAM)L"全粗");
+            
             pCtrl->hCheckShowRemain = CreateWindow(L"BUTTON", L"显示剩余编码",
                 WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
                 30, 155, 150, 24,
@@ -1342,7 +1464,7 @@ namespace {
             pCtrl->candSelText = g_candidateSelectedTextColor;
             pCtrl->toolbarBg = g_toolbarBgColor;
             pCtrl->toolbarHover = g_toolbarHoverColor;
-
+            SendMessage(pCtrl->hComboFontBold, CB_SETCURSEL, Global::nBOLD, 0);
             SendMessage(pCtrl->hCheckChinese, BM_SETCHECK, g_isChineseMode ? BST_CHECKED : BST_UNCHECKED, 0);
             SendMessage(pCtrl->hShowToolBar, BM_SETCHECK, g_isShowToolBar ? BST_CHECKED : BST_UNCHECKED, 0);
             SendMessage(pCtrl->hHVToolBar, BM_SETCHECK, g_isHToolbarWin ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -1354,6 +1476,11 @@ namespace {
             SetWindowText(pCtrl->hEditShortcut, szKey);
 
             SendMessage(pCtrl->hComboArrange, CB_SETCURSEL, g_isHorizontal ? 0 : 1, 0);
+			// 字号：显示当前 Global::nFontSize
+            WCHAR szFont[8];
+            swprintf_s(szFont, L"%d", Global::nFontSize);
+            SetWindowText(pCtrl->hEditFontSize, szFont);
+            SendMessage(pCtrl->hSpinFontSize, UDM_SETPOS, 0, MAKELPARAM(Global::nFontSize, 0));		
             WCHAR szVal[16];
             swprintf_s(szVal, L"%d", g_maxCandidatesHorizontal);
             SetWindowText(pCtrl->hEditHorizontal, szVal);
@@ -1371,9 +1498,16 @@ namespace {
             ShowWindow(pCtrl->hEditShortcut, SW_SHOW);
             ShowWindow(pCtrl->hStaticInputMode, SW_SHOW);
             ShowWindow(pCtrl->hStaticShortcut, SW_SHOW);
-            ShowWindow(pCtrl->hComboArrange, SW_HIDE);
-            ShowWindow(pCtrl->hEditHorizontal, SW_HIDE);
-            ShowWindow(pCtrl->hEditVertical, SW_HIDE);
+            //ShowWindow(pCtrl->hComboArrange, SW_HIDE);
+            ShowWindow(pCtrl->hComboArrange, SW_SHOW);    // 现在在页签1，显示
+            ShowWindow(pCtrl->hStaticArrange, SW_SHOW);
+            ShowWindow(pCtrl->hEditFontSize, SW_HIDE);    // 页签2，隐藏
+            ShowWindow(pCtrl->hSpinFontSize, SW_HIDE);
+            ShowWindow(pCtrl->hStaticFontSize, SW_HIDE);
+            ShowWindow(pCtrl->hSpinHorizontal, SW_SHOW);
+            ShowWindow(pCtrl->hSpinVertical, SW_SHOW);
+            ShowWindow(pCtrl->hEditHorizontal, SW_SHOW);
+            ShowWindow(pCtrl->hEditVertical, SW_SHOW);
             ShowWindow(pCtrl->hCheckShowRemain, SW_HIDE);
             ShowWindow(pCtrl->hBtnCandBg, SW_HIDE);
             ShowWindow(pCtrl->hBtnCandText, SW_HIDE);
@@ -1381,11 +1515,9 @@ namespace {
             ShowWindow(pCtrl->hBtnCandSelText, SW_HIDE);
             ShowWindow(pCtrl->hBtnToolbarBg, SW_HIDE);
             ShowWindow(pCtrl->hBtnToolbarHover, SW_HIDE);
-            ShowWindow(pCtrl->hStaticArrange, SW_HIDE);
-            ShowWindow(pCtrl->hStaticHorizontal, SW_HIDE);
-            ShowWindow(pCtrl->hStaticVertical, SW_HIDE);
-            ShowWindow(pCtrl->hStaticHorizNote, SW_HIDE);
-            ShowWindow(pCtrl->hStaticVertNote, SW_HIDE);
+            //ShowWindow(pCtrl->hStaticArrange, SW_HIDE);
+            ShowWindow(pCtrl->hStaticHorizontal, SW_SHOW);
+            ShowWindow(pCtrl->hStaticVertical, SW_SHOW);
             ShowWindow(pCtrl->hStaticCandColor, SW_HIDE);
             ShowWindow(pCtrl->hStaticCandBg, SW_HIDE);
             ShowWindow(pCtrl->hStaticCandText, SW_HIDE);
@@ -1394,6 +1526,10 @@ namespace {
             ShowWindow(pCtrl->hStaticToolbarColor, SW_HIDE);
             ShowWindow(pCtrl->hStaticToolbarBg, SW_HIDE);
             ShowWindow(pCtrl->hStaticToolbarHover, SW_HIDE);
+            ShowWindow(pCtrl->hComboFontName, SW_HIDE);
+            ShowWindow(pCtrl->hStaticFontName, SW_HIDE);
+            ShowWindow(pCtrl->hComboFontBold, SW_HIDE);
+            ShowWindow(pCtrl->hStaticFontBold, SW_HIDE);
 
             return TRUE;
         }
@@ -1449,15 +1585,13 @@ namespace {
                 int sel = TabCtrl_GetCurSel(pCtrl->hTab);
                 BOOL showPage1 = (sel == 0);
                 ShowWindow(pCtrl->hCheckChinese, showPage1 ? SW_SHOW : SW_HIDE);
-				ShowWindow(pCtrl->hShowToolBar, showPage1 ? SW_SHOW : SW_HIDE);
-				ShowWindow(pCtrl->hHVToolBar, showPage1 ? SW_SHOW : SW_HIDE);
+                ShowWindow(pCtrl->hShowToolBar, showPage1 ? SW_SHOW : SW_HIDE);
+                ShowWindow(pCtrl->hHVToolBar, showPage1 ? SW_SHOW : SW_HIDE);
                 ShowWindow(pCtrl->hComboInputMode, showPage1 ? SW_SHOW : SW_HIDE);
                 ShowWindow(pCtrl->hEditShortcut, showPage1 ? SW_SHOW : SW_HIDE);
                 ShowWindow(pCtrl->hStaticInputMode, showPage1 ? SW_SHOW : SW_HIDE);
                 ShowWindow(pCtrl->hStaticShortcut, showPage1 ? SW_SHOW : SW_HIDE);
-                ShowWindow(pCtrl->hComboArrange, showPage1 ? SW_HIDE : SW_SHOW);
-                ShowWindow(pCtrl->hEditHorizontal, showPage1 ? SW_HIDE : SW_SHOW);
-                ShowWindow(pCtrl->hEditVertical, showPage1 ? SW_HIDE : SW_SHOW);
+                ShowWindow(pCtrl->hComboArrange, showPage1 ? SW_SHOW : SW_HIDE);
                 ShowWindow(pCtrl->hCheckShowRemain, showPage1 ? SW_HIDE : SW_SHOW);
                 ShowWindow(pCtrl->hBtnCandBg, showPage1 ? SW_HIDE : SW_SHOW);
                 ShowWindow(pCtrl->hBtnCandText, showPage1 ? SW_HIDE : SW_SHOW);
@@ -1465,11 +1599,22 @@ namespace {
                 ShowWindow(pCtrl->hBtnCandSelText, showPage1 ? SW_HIDE : SW_SHOW);
                 ShowWindow(pCtrl->hBtnToolbarBg, showPage1 ? SW_HIDE : SW_SHOW);
                 ShowWindow(pCtrl->hBtnToolbarHover, showPage1 ? SW_HIDE : SW_SHOW);
-                ShowWindow(pCtrl->hStaticArrange, showPage1 ? SW_HIDE : SW_SHOW);
-                ShowWindow(pCtrl->hStaticHorizontal, showPage1 ? SW_HIDE : SW_SHOW);
-                ShowWindow(pCtrl->hStaticVertical, showPage1 ? SW_HIDE : SW_SHOW);
-                ShowWindow(pCtrl->hStaticHorizNote, showPage1 ? SW_HIDE : SW_SHOW);
-                ShowWindow(pCtrl->hStaticVertNote, showPage1 ? SW_HIDE : SW_SHOW);
+                ShowWindow(pCtrl->hStaticArrange, showPage1 ? SW_SHOW : SW_HIDE);
+                //
+                ShowWindow(pCtrl->hEditHorizontal, showPage1 ? SW_SHOW : SW_HIDE);
+                ShowWindow(pCtrl->hSpinHorizontal, showPage1 ? SW_SHOW : SW_HIDE);
+                ShowWindow(pCtrl->hStaticHorizontal, showPage1 ? SW_SHOW : SW_HIDE);
+                ShowWindow(pCtrl->hEditVertical, showPage1 ? SW_SHOW : SW_HIDE);
+                ShowWindow(pCtrl->hSpinVertical, showPage1 ? SW_SHOW : SW_HIDE);
+                ShowWindow(pCtrl->hStaticVertical, showPage1 ? SW_SHOW : SW_HIDE);
+                // 页签2 显示：字号
+                ShowWindow(pCtrl->hEditFontSize, showPage1 ? SW_HIDE : SW_SHOW);
+                ShowWindow(pCtrl->hSpinFontSize, showPage1 ? SW_HIDE : SW_SHOW);
+                ShowWindow(pCtrl->hStaticFontSize, showPage1 ? SW_HIDE : SW_SHOW);
+				ShowWindow(pCtrl->hComboFontName, showPage1 ? SW_HIDE : SW_SHOW);
+				ShowWindow(pCtrl->hStaticFontName, showPage1 ? SW_HIDE : SW_SHOW);
+				ShowWindow(pCtrl->hComboFontBold, showPage1 ? SW_HIDE : SW_SHOW);
+				ShowWindow(pCtrl->hStaticFontBold, showPage1 ? SW_HIDE : SW_SHOW);
                 ShowWindow(pCtrl->hStaticCandColor, showPage1 ? SW_HIDE : SW_SHOW);
                 ShowWindow(pCtrl->hStaticCandBg, showPage1 ? SW_HIDE : SW_SHOW);
                 ShowWindow(pCtrl->hStaticCandText, showPage1 ? SW_HIDE : SW_SHOW);
@@ -1544,6 +1689,62 @@ namespace {
             }
             if (ctrlId == IDOK)
             {
+                // ---- 读取候选文本字号 ----
+                WCHAR szFontVal[8] = { 0 };
+                GetWindowText(pCtrl->hEditFontSize, szFontVal, 8);
+                int fontVal = _wtoi(szFontVal);
+                if (fontVal < 12) fontVal = 12;
+                if (fontVal > 32) fontVal = 32;
+                // ---- 读取候选字体名 ----
+                WCHAR fontNameBuf[LF_FACESIZE] = { 0 };
+                GetWindowText(pCtrl->hComboFontName, fontNameBuf, LF_FACESIZE);
+                if (fontNameBuf[0] == L'\0')
+                    wcscpy_s(fontNameBuf, L"微软雅黑");   // 留空时给默认
+
+                // ---- 读取加粗 ----
+                int boldVal = (int)SendMessage(pCtrl->hComboFontBold, CB_GETCURSEL, 0, 0);
+                if (boldVal < 0 || boldVal > 3) boldVal = 1;
+
+                // 判断是否需要重建字体
+                BOOL fontChanged = (fontVal != Global::nFontSize)
+                    || (boldVal != Global::nBOLD)
+                    || (wcscmp(fontNameBuf, Global::fontName) != 0);
+
+                Global::nFontSize = fontVal;
+                Global::nBOLD = boldVal;
+                wcscpy_s(Global::fontName, LF_FACESIZE, fontNameBuf);
+
+                if (fontChanged)
+                {
+                    // 释放旧字体
+                    if (Global::defaultlFontHandle)
+                    {
+                        DeleteObject(Global::defaultlFontHandle);
+                        Global::defaultlFontHandle = nullptr;
+                    }
+
+                    // 字重映射
+                    int lfWeight = FW_NORMAL;
+                    switch (Global::nBOLD)
+                    {
+                    case 1: lfWeight = FW_MEDIUM;   break;   // 中等
+                    case 2: lfWeight = FW_SEMIBOLD; break;   // 半粗
+                    case 3: lfWeight = FW_BOLD;     break;   // 全粗
+                    default: lfWeight = FW_NORMAL;  break;
+                    }
+
+                    LOGFONTW lf = { 0 };
+                    lf.lfHeight = -Global::nFontSize;
+                    lf.lfWeight = lfWeight;
+                    lf.lfCharSet = DEFAULT_CHARSET;
+                    lf.lfOutPrecision = OUT_DEFAULT_PRECIS;
+                    lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
+                    lf.lfQuality = CLEARTYPE_QUALITY;
+                    lf.lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+                    wcscpy_s(lf.lfFaceName, LF_FACESIZE, Global::fontName);
+
+                    Global::defaultlFontHandle = CreateFontIndirectW(&lf);
+                }
                 // 读取控件值
                       /*      BOOL g_isChineseMode = TRUE;
             BOOL g_isPinyinMode = FALSE;
@@ -1591,7 +1792,8 @@ namespace {
                 g_candidateSelectedTextColor = pCtrl->candSelText;
                 g_toolbarBgColor = pCtrl->toolbarBg;
                 g_toolbarHoverColor = pCtrl->toolbarHover;
-
+                Global::nMaxHorizontalItems = g_maxCandidatesHorizontal;//即时生效
+                Global::nMaxVerticalItems = g_maxCandidatesVertical;
                 SaveIniSettings();
 
                 HWND hToolbar = Global::hToolBarWnd;
@@ -1643,7 +1845,8 @@ namespace {
 
     void ShowSettingsDialog()
     {
-        INITCOMMONCONTROLSEX icex = { sizeof(INITCOMMONCONTROLSEX), ICC_TAB_CLASSES };
+        INITCOMMONCONTROLSEX icex = { sizeof(INITCOMMONCONTROLSEX),
+                                      ICC_TAB_CLASSES | ICC_UPDOWN_CLASS };
         InitCommonControlsEx(&icex);
 
         HWND hParent = GetDesktopWindow();
@@ -1813,36 +2016,36 @@ namespace {
             SetWindowLongPtr(hCodeEdit, GWLP_USERDATA, (LONG_PTR)GetWindowLongPtr(hCodeEdit, GWLP_WNDPROC));
             SetWindowLongPtr(hCodeEdit, GWLP_WNDPROC, (LONG_PTR)CodeEditSubclassProc);
             // 原先的 else 分支：从剪贴板获取或使用默认文本
-             // ========== 新增：优先从剪贴板获取前5个汉字，并更新 Global::m_recentHanzi ==========
-            WCHAR clipboardHanzi[16] = { 0 };   // 最多15个汉字+结束符
-            if (OpenClipboard(hDlg))
-            {
-                HANDLE hData = GetClipboardData(CF_UNICODETEXT);
-                if (hData)
-                {
-                    LPCWSTR pClip = (LPCWSTR)GlobalLock(hData);
-                    if (pClip)
-                    {
-                        int idx = 0;
-                        for (int i = 0; pClip[i] && idx < 15; i++)
-                        {
-                            if (pClip[i] >= 0x4E00 && pClip[i] <= 0x9FFF)
-                            {
-                                clipboardHanzi[idx++] = pClip[i];
-                            }
-                            //else break;
-                        }
-                        if (idx > 0)
-                        {
-                            clipboardHanzi[idx] = L'\0';
-                            // 更新全局最近汉字缓冲区
-                            wcsncpy_s(Global::m_recentHanzi, _countof(Global::m_recentHanzi), clipboardHanzi, _TRUNCATE);
-                        }
-                        GlobalUnlock(hData);
-                    }
-                }
-                CloseClipboard();
-            }
+             // ========== 新增：优先从剪贴板获取前5个汉字，并更新 Global::m_recentHanzi ==========已经改成最新优先
+            //WCHAR clipboardHanzi[16] = { 0 };   // 最多15个汉字+结束符
+            //if (OpenClipboard(hDlg))
+            //{
+            //    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+            //    if (hData)
+            //    {
+            //        LPCWSTR pClip = (LPCWSTR)GlobalLock(hData);
+            //        if (pClip)
+            //        {
+            //            int idx = 0;
+            //            for (int i = 0; pClip[i] && idx < 15; i++)
+            //            {
+            //                if (pClip[i] >= 0x4E00 && pClip[i] <= 0x9FFF)
+            //                {
+            //                    clipboardHanzi[idx++] = pClip[i];
+            //                }
+            //                //else break;
+            //            }
+            //            if (idx > 0)
+            //            {
+            //                clipboardHanzi[idx] = L'\0';
+            //                // 更新全局最近汉字缓冲区
+            //                wcsncpy_s(Global::m_recentHanzi, _countof(Global::m_recentHanzi), clipboardHanzi, _TRUNCATE);
+            //            }
+            //            GlobalUnlock(hData);
+            //        }
+            //    }
+            //    CloseClipboard();
+            //}
             const WCHAR* recent = Global::m_recentHanzi;
             WCHAR displayText[256] = { 0 };          // 用于存储最终显示的词语
             BOOL useRecentSubclass = FALSE;          // 是否启用最近汉字的左右键功能
